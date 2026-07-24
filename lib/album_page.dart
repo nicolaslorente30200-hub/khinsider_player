@@ -1,0 +1,490 @@
+import 'package:flutter/material.dart';
+import 'package:just_audio/just_audio.dart';
+import 'package:just_audio_background/just_audio_background.dart';
+
+import 'khinsider.dart';
+import 'kodi.dart';
+import 'lecteur.dart';
+import 'main.dart';
+
+class PageAlbum extends StatefulWidget {
+  final String slug;
+  const PageAlbum({super.key, required this.slug});
+
+  @override
+  State<PageAlbum> createState() => _PageAlbumState();
+}
+
+class _PageAlbumState extends State<PageAlbum> {
+  /// Lecteur unique de l'application (seul rattache au service audio).
+  final AudioPlayer _lecteur = Lecteur.instance.player;
+
+  AlbumDetail? _album;
+  String? _erreur;
+
+  /// positionStream emet tres frequemment (plusieurs fois par seconde) :
+  /// sur un GPU d'entree de gamme, ces reconstructions en continu pendant
+  /// la lecture saturaient le pipeline de rendu (Impeller/Vulkan), au point
+  /// de mettre en attente le traitement d'un travail deja termine (la
+  /// resolution de la piste suivante) — observe : la file restait bloquee
+  /// tant que la lecture tournait, et repartait des qu'on mettait pause.
+  /// On limite donc la frequence de rafraichissement a 1x/seconde.
+  late final Stream<Duration> _positionThrottlee = _lecteur.positionStream
+      .map((d) => Duration(seconds: d.inSeconds))
+      .distinct();
+
+  @override
+  void initState() {
+    super.initState();
+    _charger();
+  }
+
+  // Pas de dispose() a ecrire : la file d'attente et son suivi vivent dans
+  // Lecteur.instance (voir lecteur.dart), independamment de cette page.
+  // C'est le point du bug corrige : ils survivent au bouton retour.
+
+  Future<void> _charger() async {
+    setState(() => _erreur = null);
+
+    try {
+      final AlbumDetail album;
+      if (Lecteur.instance.slugActif.value == widget.slug &&
+          Lecteur.instance.albumActif != null) {
+        // Meme album deja en cours de lecture (ex. retour puis reouverture
+        // de la page) : on reprend l'etat existant, pas de nouvelle requete
+        // ni de redemarrage de la file depuis la piste 1.
+        album = Lecteur.instance.albumActif!;
+      } else {
+        album = await Kh.album(widget.slug);
+        Lecteur.instance.chargerAlbum(album);
+      }
+      if (!mounted) return;
+      setState(() => _album = album);
+
+      if (album.pistes.isEmpty) {
+        setState(() => _erreur = 'Aucune piste détectée sur cet album.');
+      }
+    } catch (e) {
+      if (mounted) setState(() => _erreur = '$e');
+    }
+  }
+
+  /// Envoie l'album a Kodi via l'action native de l'addon (voir kodi.dart) :
+  /// invoquee via Addons.ExecuteAddon, avec toutes les metadonnees.
+  Future<void> _casterKodi(AlbumDetail album) async {
+    var config = await Kodi.configuration();
+    config ??= await _configurerKodi();
+    if (config == null) return;
+
+    try {
+      await Kodi.casterAlbum(config, album.slug);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Envoyé à Kodi : ${album.titre}')),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Échec du cast Kodi : $e')),
+        );
+      }
+    }
+  }
+
+  Future<ConfigKodi?> _configurerKodi() async {
+    final existant = await Kodi.configuration();
+    final hoteCtrl = TextEditingController(text: existant?.hote ?? '');
+    final portCtrl = TextEditingController(text: (existant?.port ?? 8080).toString());
+    final utilisateurCtrl = TextEditingController(text: existant?.utilisateur ?? '');
+    final motDePasseCtrl = TextEditingController(text: existant?.motDePasse ?? '');
+
+    if (!mounted) return null;
+    final resultat = await showDialog<ConfigKodi>(
+      context: context,
+      builder: (contexteDialogue) => AlertDialog(
+        backgroundColor: kSurface,
+        title: const Text('Configuration Kodi', style: TextStyle(color: kText)),
+        content: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              TextField(
+                controller: hoteCtrl,
+                style: const TextStyle(color: kText),
+                decoration: const InputDecoration(
+                  labelText: 'Adresse IP de la box',
+                  helperText: 'Adresse IP obligatoire : Android ne résout pas '
+                      'les noms .local (mDNS), contrairement à iOS/macOS.',
+                  helperMaxLines: 2,
+                ),
+              ),
+              TextField(
+                controller: portCtrl,
+                keyboardType: TextInputType.number,
+                style: const TextStyle(color: kText),
+                decoration: const InputDecoration(labelText: 'Port (8080 par défaut)'),
+              ),
+              TextField(
+                controller: utilisateurCtrl,
+                style: const TextStyle(color: kText),
+                decoration: const InputDecoration(labelText: 'Utilisateur (optionnel)'),
+              ),
+              TextField(
+                controller: motDePasseCtrl,
+                obscureText: true,
+                style: const TextStyle(color: kText),
+                decoration: const InputDecoration(labelText: 'Mot de passe (optionnel)'),
+              ),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(contexteDialogue).pop(),
+            child: const Text('Annuler'),
+          ),
+          TextButton(
+            onPressed: () {
+              final hote = hoteCtrl.text.trim();
+              if (hote.isEmpty) return;
+              Navigator.of(contexteDialogue).pop(ConfigKodi(
+                hote: hote,
+                port: int.tryParse(portCtrl.text.trim()) ?? 8080,
+                utilisateur: utilisateurCtrl.text.trim(),
+                motDePasse: motDePasseCtrl.text,
+              ));
+            },
+            child: const Text('Enregistrer'),
+          ),
+        ],
+      ),
+    );
+
+    if (resultat != null) {
+      await Kodi.enregistrer(resultat);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Configuration Kodi enregistrée.')),
+        );
+      }
+    }
+    return resultat;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final album = _album;
+
+    return Scaffold(
+      appBar: AppBar(
+        title: Text(album?.titre ?? 'Album'),
+        actions: [
+          if (album != null)
+            IconButton(
+              tooltip: 'Caster sur Kodi (appui long : configurer l\'adresse)',
+              icon: const Icon(Icons.cast, color: kAmber),
+              onPressed: () => _casterKodi(album),
+              onLongPress: () => _configurerKodi(),
+            ),
+        ],
+      ),
+      body: album == null
+          ? (_erreur != null
+              ? _messageErreur()
+              : const Center(child: CircularProgressIndicator(color: kAmber)))
+          : (_erreur != null
+              ? Column(
+                  children: [_entete(album), Expanded(child: _messageErreur())],
+                )
+              // Tout dans un seul CustomScrollView (en-tete inclus) : en
+              // format paysage, l'en-tete + la barre du bas laissaient trop
+              // peu de hauteur a une liste figee par Expanded, et rien
+              // n'etait scrollable pour rattraper le manque de place.
+              : CustomScrollView(
+                  slivers: [
+                    SliverToBoxAdapter(child: _entete(album)),
+                    SliverToBoxAdapter(
+                      child: ValueListenableBuilder<bool>(
+                        valueListenable: Lecteur.instance.preparation,
+                        builder: (context, preparation, _) => preparation
+                            ? _progression(album)
+                            : const SizedBox.shrink(),
+                      ),
+                    ),
+                    _listePistes(album),
+                  ],
+                )),
+      bottomNavigationBar: ValueListenableBuilder<List<Piste>>(
+        valueListenable: Lecteur.instance.pistesEnFile,
+        builder: (context, enFile, _) =>
+            enFile.isNotEmpty ? _barreLecteur() : const SizedBox.shrink(),
+      ),
+    );
+  }
+
+  Widget _entete(AlbumDetail album) {
+    return Padding(
+      padding: const EdgeInsets.all(14),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Pochette(url: album.pochette, taille: 110, titre: album.titre),
+          const SizedBox(width: 14),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(album.titre,
+                    style: const TextStyle(
+                        color: kText, fontSize: 17, fontWeight: FontWeight.bold)),
+                if (album.infos.isNotEmpty) ...[
+                  const SizedBox(height: 6),
+                  Text(album.infos,
+                      maxLines: 3,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(color: kMuted, fontSize: 13)),
+                ],
+                if (album.annee.isNotEmpty) ...[
+                  const SizedBox(height: 4),
+                  Text(album.annee,
+                      style: const TextStyle(
+                          color: kAmberDim,
+                          fontSize: 14,
+                          fontWeight: FontWeight.w600)),
+                ],
+                const SizedBox(height: 6),
+                ValueListenableBuilder<int>(
+                  valueListenable: Lecteur.instance.echecs,
+                  builder: (context, echecs, _) => Text(
+                    '${album.pistes.length} pistes'
+                    '${echecs > 0 ? " · $echecs indisponible(s)" : ""}',
+                    style: const TextStyle(color: kMuted, fontSize: 12.5),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _progression(AlbumDetail album) {
+    return ValueListenableBuilder<List<Piste>>(
+      valueListenable: Lecteur.instance.pistesEnFile,
+      builder: (context, enFile, _) => Container(
+        margin: const EdgeInsets.symmetric(horizontal: 14),
+        padding: const EdgeInsets.all(12),
+        decoration: BoxDecoration(
+          color: kSurface,
+          border: Border.all(color: kLine),
+          borderRadius: BorderRadius.circular(10),
+        ),
+        child: Row(
+          children: [
+            // Pas de CircularProgressIndicator ici : c'est une animation en
+            // boucle (AnimationController.repeat()) qui, combinee a
+            // Impeller/Vulkan sur certains GPU d'entree de gamme (bug connu,
+            // cf. flutter/flutter#184655), sature le pipeline de rendu au
+            // point de mettre en pause tout le reste — y compris le
+            // traitement du resultat deja arrive de la piste suivante. Une
+            // icone fixe evite de declencher ce bug.
+            const Icon(Icons.cloud_download_outlined, size: 18, color: kAmber),
+            const SizedBox(width: 12),
+            Text('Piste ${enFile.length} / ${album.pistes.length}',
+                style: const TextStyle(color: kMuted, fontSize: 13)),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _listePistes(AlbumDetail album) {
+    return ValueListenableBuilder<List<Piste>>(
+      valueListenable: Lecteur.instance.pistesEnFile,
+      builder: (context, enFile, _) => StreamBuilder<int?>(
+        stream: _lecteur.currentIndexStream,
+        builder: (context, snap) {
+          final courant = snap.data;
+          return SliverList(
+            delegate: SliverChildBuilderDelegate(
+              (_, i) {
+                final p = album.pistes[i];
+                final position = enFile.indexOf(p); // -1 si pas encore prete
+                final prete = position >= 0;
+                final actif = prete && courant == position;
+
+                return Container(
+                  decoration: const BoxDecoration(
+                    border: Border(bottom: BorderSide(color: kLine, width: 1)),
+                  ),
+                  child: ListTile(
+                    dense: true,
+                    leading: Text(
+                      (i + 1).toString().padLeft(2, '0'),
+                      style: TextStyle(
+                          color: actif ? kAmber : kMuted, fontSize: 13),
+                    ),
+                    title: Text(
+                      p.nom,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        color: actif ? kAmber : (prete ? kText : kMuted),
+                        fontWeight: actif ? FontWeight.w600 : FontWeight.normal,
+                        fontSize: 14,
+                      ),
+                    ),
+                    trailing: Text(
+                      prete ? p.duree : '…',
+                      style: const TextStyle(color: kMuted, fontSize: 12.5),
+                    ),
+                    onTap: prete
+                        ? () {
+                            _lecteur.seek(Duration.zero, index: position);
+                            _lecteur.play();
+                          }
+                        : null,
+                  ),
+                );
+              },
+              childCount: album.pistes.length,
+            ),
+          );
+        },
+      ),
+    );
+  }
+
+  Widget _barreLecteur() {
+    return Container(
+      decoration: const BoxDecoration(
+        color: kSurface,
+        border: Border(top: BorderSide(color: kLine)),
+      ),
+      padding: const EdgeInsets.fromLTRB(12, 8, 12, 12),
+      child: SafeArea(
+        top: false,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            StreamBuilder<SequenceState?>(
+              stream: _lecteur.sequenceStateStream,
+              builder: (context, snap) {
+                final item = snap.data?.currentSource?.tag as MediaItem?;
+                return Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        item?.title ?? '—',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(color: kAmber, fontSize: 14),
+                      ),
+                    ),
+                    StreamBuilder<Duration>(
+                      stream: _positionThrottlee,
+                      builder: (context, s) {
+                        final d = s.data ?? Duration.zero;
+                        return Text(
+                          '${d.inMinutes}:${(d.inSeconds % 60).toString().padLeft(2, '0')}',
+                          style: const TextStyle(color: kMuted, fontSize: 13),
+                        );
+                      },
+                    ),
+                  ],
+                );
+              },
+            ),
+            StreamBuilder<Duration>(
+              stream: _positionThrottlee,
+              builder: (context, snapPos) {
+                final duree = _lecteur.duration ?? Duration.zero;
+                final pos = snapPos.data ?? Duration.zero;
+                final max = duree.inMilliseconds.toDouble();
+                final val =
+                    pos.inMilliseconds.clamp(0, duree.inMilliseconds).toDouble();
+                return SliderTheme(
+                  data: SliderTheme.of(context).copyWith(
+                    trackHeight: 3,
+                    thumbShape:
+                        const RoundSliderThumbShape(enabledThumbRadius: 6),
+                    activeTrackColor: kAmber,
+                    inactiveTrackColor: kLine,
+                    thumbColor: kAmber,
+                    overlayShape: SliderComponentShape.noOverlay,
+                  ),
+                  child: Slider(
+                    min: 0,
+                    max: max > 0 ? max : 1,
+                    value: max > 0 ? val : 0,
+                    onChanged: max > 0
+                        ? (v) => _lecteur.seek(Duration(milliseconds: v.round()))
+                        : null,
+                  ),
+                );
+              },
+            ),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                IconButton(
+                  icon: const Icon(Icons.skip_previous, color: kText),
+                  onPressed:
+                      _lecteur.hasPrevious ? _lecteur.seekToPrevious : null,
+                ),
+                const SizedBox(width: 18),
+                StreamBuilder<PlayerState>(
+                  stream: _lecteur.playerStateStream,
+                  builder: (context, snap) {
+                    final enLecture = snap.data?.playing ?? false;
+                    return FloatingActionButton(
+                      backgroundColor: kAmber,
+                      foregroundColor: const Color(0xFF1A1206),
+                      elevation: 0,
+                      onPressed: enLecture ? _lecteur.pause : _lecteur.play,
+                      child: Icon(enLecture ? Icons.pause : Icons.play_arrow),
+                    );
+                  },
+                ),
+                const SizedBox(width: 18),
+                IconButton(
+                  icon: const Icon(Icons.skip_next, color: kText),
+                  onPressed: _lecteur.hasNext ? _lecteur.seekToNext : null,
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _messageErreur() {
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(24),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Icon(Icons.error_outline, color: kMuted, size: 36),
+            const SizedBox(height: 12),
+            Text(_erreur ?? '',
+                textAlign: TextAlign.center,
+                style: const TextStyle(color: kMuted, fontSize: 13)),
+            const SizedBox(height: 16),
+            OutlinedButton(
+              onPressed: _charger,
+              style: OutlinedButton.styleFrom(
+                foregroundColor: kAmber,
+                side: const BorderSide(color: kAmberDim),
+              ),
+              child: const Text('Réessayer'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}

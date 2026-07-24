@@ -1,0 +1,89 @@
+name: Compiler l'APK
+
+# Compilation uniquement manuelle : bouton "Run workflow" dans l'onglet Actions.
+# Ainsi, deposer plusieurs fichiers ne declenche pas plusieurs compilations.
+on:
+  workflow_dispatch:
+
+# Necessaire pour creer une release automatiquement
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Récupérer le dépôt
+        uses: actions/checkout@v4
+
+      - name: Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Flutter (canal stable)
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+
+      - name: Mettre le code de côté
+        run: |
+          mkdir -p /tmp/sauvegarde
+          cp -r lib /tmp/sauvegarde/
+          cp pubspec.yaml /tmp/sauvegarde/
+
+      - name: Générer les dossiers de plateforme
+        run: flutter create . --platforms=android --project-name khinsider_ost --org xyz.perso
+
+      - name: Restaurer le code
+        run: |
+          rm -rf lib
+          cp -r /tmp/sauvegarde/lib lib
+          cp /tmp/sauvegarde/pubspec.yaml pubspec.yaml
+
+      - name: Adapter la configuration Android (audio en arrière-plan)
+        run: python3 tools/patch_android.py
+
+      - name: Vérifier la configuration Android
+        run: |
+          echo "===== AndroidManifest.xml ====="
+          cat android/app/src/main/AndroidManifest.xml
+          echo "===== MainActivity ====="
+          find android/app/src/main -name 'MainActivity.*' -exec cat {} +
+          echo "===== minSdk ====="
+          grep -rn "minSdk" android/app/build.gradle* || true
+
+      - name: Dépendances
+        run: flutter pub get
+
+      - name: Compiler l'APK
+        run: flutter build apk --release --dart-define=VERSION=${{ github.run_number }}
+
+      - name: Renommer l'APK
+        run: |
+          mkdir -p sortie
+          cp build/app/outputs/flutter-apk/app-release.apk \
+             sortie/khinsider-ost-v${{ github.run_number }}.apk
+
+      # Artifact : accessible depuis la page de l'execution (90 jours)
+      - name: Publier l'artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: khinsider-ost-apk
+          path: sortie/*.apk
+          if-no-files-found: error
+
+      # Release : lien de telechargement direct, permanent, pratique sur mobile
+      - name: Publier la release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ github.run_number }}
+          name: KHINSIDER-ost v${{ github.run_number }}
+          body: |
+            APK compilé automatiquement depuis le commit ${{ github.sha }}.
+            Télécharger le fichier .apk ci-dessous et l'installer sur Android.
+          files: sortie/*.apk
+          draft: false
+          prerelease: false

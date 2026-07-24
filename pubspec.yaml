@@ -1,0 +1,43 @@
+name: khinsider_ost
+description: Consultation et ecoute des soundtracks khinsider
+publish_to: 'none'
+version: 1.0.0+1
+
+environment:
+  sdk: '>=3.3.0 <4.0.0'
+
+dependencies:
+  flutter:
+    sdk: flutter
+
+  # Reseau et analyse HTML (scraping)
+  http: ^1.2.0
+  html: ^0.15.4
+
+  # Lecture audio + arriere-plan / ecran de verrouillage
+  just_audio: ^0.9.40
+  just_audio_background: ^0.0.1-beta.13
+
+  # Autorisation de notification : obligatoire depuis Android 13, sans quoi
+  # la notification du lecteur reste invisible et le service ne tient pas
+  permission_handler: ^11.3.1
+
+  # Config Kodi (adresse/port) persistee pour le cast direct via JSON-RPC
+  shared_preferences: ^2.3.3
+
+dev_dependencies:
+  flutter_lints: ^3.0.0
+  flutter_launcher_icons: ^0.14.1
+
+flutter:
+  uses-material-design: true
+  assets:
+    - assets/icon/
+
+# Genere les icones Android (legacy + adaptative) a partir des sources dans
+# assets/icon/ : `dart run flutter_launcher_icons` pour regenerer.
+flutter_launcher_icons:
+  android: true
+  image_path: assets/icon/tile.png
+  adaptive_icon_background: "#14171C"
+  adaptive_icon_foreground: assets/icon/foreground.png
