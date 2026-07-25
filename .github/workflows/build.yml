@@ -1,5 +1,4 @@
 name: Compiler l'APK
-
 # Compilation uniquement manuelle : bouton "Run workflow" dans l'onglet Actions.
 # Ainsi, deposer plusieurs fichiers ne declenche pas plusieurs compilations.
 on:
