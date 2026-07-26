@@ -21,6 +21,10 @@ const kAmberDim = Color(0xFF8A5E24);
 /// Numero de compilation, injecte par GitHub Actions (--dart-define).
 const String kVersion = String.fromEnvironment('VERSION', defaultValue: 'dev');
 
+/// Filtre local (sans requete reseau) applique a la page actuellement
+/// affichee — ex. PageNouveautes filtre sa liste deja chargee selon ce texte.
+final ValueNotifier<String> filtrePage = ValueNotifier<String>('');
+
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
@@ -95,12 +99,38 @@ class Accueil extends StatefulWidget {
 
 class _AccueilState extends State<Accueil> {
   int _onglet = 0;
+  bool _rechercheOuverte = false;
+  final _controleurFiltre = TextEditingController();
+
+  @override
+  void dispose() {
+    _controleurFiltre.dispose();
+    super.dispose();
+  }
+
+  void _fermerRecherche() {
+    setState(() => _rechercheOuverte = false);
+    _controleurFiltre.clear();
+    filtrePage.value = '';
+  }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: RichText(
+        title: _rechercheOuverte
+            ? TextField(
+                controller: _controleurFiltre,
+                autofocus: true,
+                style: const TextStyle(color: kText),
+                decoration: const InputDecoration(
+                  hintText: 'Filtrer cette page…',
+                  hintStyle: TextStyle(color: kMuted),
+                  border: InputBorder.none,
+                ),
+                onChanged: (v) => filtrePage.value = v,
+              )
+            : RichText(
           text: const TextSpan(
             style: TextStyle(
               fontSize: 20,
@@ -119,6 +149,13 @@ class _AccueilState extends State<Accueil> {
           ),
         ),
         actions: [
+          IconButton(
+            tooltip: _rechercheOuverte ? 'Fermer le filtre' : 'Filtrer cette page',
+            icon: Icon(_rechercheOuverte ? Icons.close : Icons.search, color: kAmber),
+            onPressed: _rechercheOuverte
+                ? _fermerRecherche
+                : () => setState(() => _rechercheOuverte = true),
+          ),
           IconButton(
             tooltip: 'Informations',
             icon: const Icon(Icons.info_outline, color: kAmber),
@@ -160,20 +197,28 @@ class _AccueilState extends State<Accueil> {
             backgroundColor: kSurface,
             indicatorColor: kAmberDim,
             selectedIndex: _onglet,
-            onDestinationSelected: (i) => setState(() => _onglet = i),
+            onDestinationSelected: (i) {
+              if (_rechercheOuverte) _fermerRecherche();
+              setState(() => _onglet = i);
+            },
+            // Couleur explicite sur chaque icone : sans ca, l'icone
+            // selectionnee prend une teinte calculee par le theme Material3
+            // (onSecondaryContainer), differente du orange exact (kAmber)
+            // utilise explicitement partout ailleurs dans l'app.
             destinations: const [
               NavigationDestination(
-                icon: Icon(Icons.new_releases_outlined),
-                selectedIcon: Icon(Icons.new_releases),
+                icon: Icon(Icons.new_releases_outlined, color: kMuted),
+                selectedIcon: Icon(Icons.new_releases, color: kAmber),
                 label: 'Nouveautés',
               ),
               NavigationDestination(
-                icon: Icon(Icons.explore_outlined),
-                selectedIcon: Icon(Icons.explore),
+                icon: Icon(Icons.explore_outlined, color: kMuted),
+                selectedIcon: Icon(Icons.explore, color: kAmber),
                 label: 'Parcourir',
               ),
               NavigationDestination(
-                icon: Icon(Icons.search),
+                icon: Icon(Icons.search, color: kMuted),
+                selectedIcon: Icon(Icons.search, color: kAmber),
                 label: 'Recherche',
               ),
             ],
@@ -217,89 +262,50 @@ class _MiniLecteur extends StatelessWidget {
                   Pochette(url: album?.pochette, taille: 36, titre: album?.titre ?? ''),
                   const SizedBox(width: 10),
                   Expanded(
-                    child: ValueListenableBuilder<bool>(
-                      valueListenable: Lecteur.instance.preparation,
-                      builder: (context, enPreparation, _) {
-                        if (enPreparation) {
-                          return ValueListenableBuilder<List<Piste>>(
-                            valueListenable: Lecteur.instance.pistesEnFile,
-                            builder: (context, enFile, __) {
-                              final total = album?.pistes.length;
-                              return Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                mainAxisSize: MainAxisSize.min,
-                                children: [
-                                  const Text(
-                                    'Chargement de l\'album…',
-                                    maxLines: 1,
-                                    overflow: TextOverflow.ellipsis,
-                                    style: TextStyle(
-                                        color: kText, fontSize: 13, fontWeight: FontWeight.w600),
-                                  ),
-                                  Text(
-                                    total != null
-                                        ? '${album!.titre} · ${enFile.length}/$total pistes'
-                                        : album?.titre ?? '',
-                                    maxLines: 1,
-                                    overflow: TextOverflow.ellipsis,
-                                    style: const TextStyle(color: kMuted, fontSize: 11.5),
-                                  ),
-                                ],
-                              );
-                            },
-                          );
-                        }
-                        return StreamBuilder<SequenceState?>(
-                          stream: lecteur.sequenceStateStream,
-                          builder: (context, snap) {
-                            final item = snap.data?.currentSource?.tag as MediaItem?;
-                            return Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                Text(
-                                  item?.title ?? album?.titre ?? '…',
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                                  style: const TextStyle(
-                                      color: kText, fontSize: 13, fontWeight: FontWeight.w600),
-                                ),
-                                if (album != null)
-                                  Text(
-                                    album.titre,
-                                    maxLines: 1,
-                                    overflow: TextOverflow.ellipsis,
-                                    style: const TextStyle(color: kMuted, fontSize: 11.5),
-                                  ),
-                              ],
-                            );
-                          },
+                    child: StreamBuilder<SequenceState?>(
+                      stream: lecteur.sequenceStateStream,
+                      builder: (context, snap) {
+                        final item = snap.data?.currentSource?.tag as MediaItem?;
+                        return Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Text(
+                              item?.title ?? album?.titre ?? '…',
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(
+                                  color: kText, fontSize: 13, fontWeight: FontWeight.w600),
+                            ),
+                            if (album != null)
+                              Text(
+                                album.titre,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: const TextStyle(color: kMuted, fontSize: 11.5),
+                              ),
+                          ],
                         );
                       },
                     ),
                   ),
-                  ValueListenableBuilder<bool>(
-                    valueListenable: Lecteur.instance.preparation,
-                    builder: (context, enPreparation, _) {
-                      if (enPreparation) {
-                        return const Padding(
-                          padding: EdgeInsets.all(12),
-                          child: SizedBox(
-                            width: 20,
-                            height: 20,
-                            child: CircularProgressIndicator(strokeWidth: 2, color: kAmber),
-                          ),
-                        );
-                      }
-                      return StreamBuilder<PlayerState>(
-                        stream: lecteur.playerStateStream,
-                        builder: (context, snap) {
-                          final enLecture = snap.data?.playing ?? false;
-                          return IconButton(
+                  StreamBuilder<PlayerState>(
+                    stream: lecteur.playerStateStream,
+                    builder: (context, snap) {
+                      final enLecture = snap.data?.playing ?? false;
+                      return Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          IconButton(
                             icon: Icon(enLecture ? Icons.pause : Icons.play_arrow, color: kAmber),
                             onPressed: enLecture ? lecteur.pause : lecteur.play,
-                          );
-                        },
+                          ),
+                          IconButton(
+                            tooltip: 'Stop',
+                            icon: const Icon(Icons.stop, color: kMuted),
+                            onPressed: lecteur.stop,
+                          ),
+                        ],
                       );
                     },
                   ),
@@ -368,10 +374,30 @@ class _PageNouveautesState extends State<PageNouveautes>
                   style: TextStyle(color: kMuted)),
             );
           }
-          return ListView.builder(
-            padding: const EdgeInsets.all(12),
-            itemCount: albums.length,
-            itemBuilder: (_, i) => CarteAlbum(album: albums[i]),
+          return ValueListenableBuilder<String>(
+            valueListenable: filtrePage,
+            builder: (context, filtre, _) {
+              final q = filtre.trim().toLowerCase();
+              final visibles = q.isEmpty
+                  ? albums
+                  : albums
+                      .where((a) =>
+                          a.titre.toLowerCase().contains(q) ||
+                          a.infos.toLowerCase().contains(q) ||
+                          a.annee.toLowerCase().contains(q))
+                      .toList();
+              if (visibles.isEmpty) {
+                return const Center(
+                  child: Text('Aucun résultat pour ce filtre.',
+                      style: TextStyle(color: kMuted)),
+                );
+              }
+              return ListView.builder(
+                padding: const EdgeInsets.all(12),
+                itemCount: visibles.length,
+                itemBuilder: (_, i) => CarteAlbum(album: visibles[i]),
+              );
+            },
           );
         },
       ),

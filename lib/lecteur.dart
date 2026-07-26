@@ -101,7 +101,13 @@ class Lecteur {
     preparation.value = true;
 
     try {
-      await _remplirBoucle(album);
+      // Limite de temps globale, quelle que soit l'etape en cause (reseau,
+      // stop/setAudioSource/play...) : sans elle, un blocage indefini d'un
+      // de ces appels laissait _preparationEnCours bloque a "true" pour
+      // toujours, empechant tout changement d'album suivant de meme
+      // demarrer sa resolution (bloque a 0 piste). Avec la limite, on
+      // abandonne au bout de 8 s et le verrou se relache normalement.
+      await _remplirBoucle(album).timeout(const Duration(seconds: 8));
     } catch (e) {
       // Le verrou _preparationEnCours ne se relachait qu'apres la boucle :
       // une exception non rattrapee ici la laissait bloquee a "true" pour
@@ -161,17 +167,10 @@ class Lecteur {
   /// reproduisait a l'identique, juste decale, meme en ne pre-chargeant que
   /// quelques pistes avant de demarrer. La seule sequence fiable est donc
   /// de ne plus jamais toucher la playlist une fois play() lance : tout se
-  /// resout avant. Consequence assumee : demarrer apres N pistes puis
-  /// completer en tache de fond reintroduirait ce meme blocage — ecarte pour
-  /// cette raison au profit de la resolution en parallele ci-dessous.
+  /// resout avant.
   ///
-  /// Resolution en parallele (4 pistes a la fois) plutot qu'une par une :
-  /// seul levier compatible avec la contrainte ci-dessus pour accelerer les
-  /// gros albums (100+ pistes, plusieurs minutes en sequentiel). Chaque
-  /// travailleur garde le meme espacement de 600 ms entre ses propres
-  /// requetes (le site limite le debit) ; 4 travailleurs en parallele
-  /// multiplient donc le debit total par ~4 — a surveiller si khinsider se
-  /// met a bloquer davantage de requetes sous cette charge, pas teste avant.
+  /// Resolution en parallele (4 pistes a la fois) plutot qu'une par une,
+  /// pour accelerer les gros albums (100+ pistes, plusieurs minutes sinon).
   Future<void> _remplirBoucle(AlbumDetail album) async {
     final n = album.pistes.length;
     final resultats = List<AudioSource?>.filled(n, null);

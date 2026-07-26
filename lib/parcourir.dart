@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 
-import 'album_page.dart';
 import 'khinsider.dart';
 import 'main.dart';
 
@@ -85,9 +84,14 @@ class PageParcourir extends StatelessWidget {
               onTap: () => _ouvrirListe(context, c.libelle, c.chemin),
             ),
           _Pastille(
-            libelle: 'Album au hasard',
+            libelle: 'Albums au hasard',
             icone: Icons.shuffle,
             onTap: () => _albumAuHasard(context),
+          ),
+          _Pastille(
+            libelle: 'Tirage filtré',
+            icone: Icons.tune,
+            onTap: () => _ouvrirRequeteur(context),
           ),
         ]),
         const SizedBox(height: 24),
@@ -163,28 +167,240 @@ class PageParcourir extends StatelessWidget {
     ));
   }
 
-  Future<void> _albumAuHasard(BuildContext context) async {
-    final messenger = ScaffoldMessenger.of(context);
-    showDialog<void>(
-      context: context,
-      barrierDismissible: false,
-      builder: (_) => const Center(
-        child: CircularProgressIndicator(color: kAmber),
+  /// Plutot qu'un seul album (l'ancien comportement, via /random-album),
+  /// tire [nombre] albums independamment au hasard (meme mecanisme, repete)
+  /// pour naviguer dans une liste — sujet a retirage a chaque "Reessayer"
+  /// grace a PageListeAlbums.chargeur.
+  Future<List<Album>> _tirageAuHasard({int nombre = 10}) async {
+    final slugs = <String>{};
+    while (slugs.length < nombre) {
+      slugs.add(await Kh.albumAuHasard());
+    }
+    final details = await Future.wait(slugs.map(Kh.album));
+    return [
+      for (final d in details)
+        Album(
+          slug: d.slug,
+          titre: d.titre,
+          pochette: d.pochette,
+          infos: d.infos,
+          annee: d.annee,
+        ),
+    ];
+  }
+
+  void _albumAuHasard(BuildContext context) {
+    Navigator.of(context).push(MaterialPageRoute(
+      builder: (_) => PageListeAlbums(
+        titre: 'Au hasard',
+        chemin: '',
+        chargeur: _tirageAuHasard,
+      ),
+    ));
+  }
+
+  /// Tirage au hasard restreint a des plateformes et/ou annees choisies. Sans
+  /// aucun critere, retombe sur _tirageAuHasard (hasard pur, tout le site).
+  /// Avec des plateformes : recupere leurs listes completes, filtrees par
+  /// annee si des annees sont aussi choisies (les pages de plateforme
+  /// donnent deja l'annee par album, pas besoin d'appel supplementaire).
+  /// Avec seulement des annees : recupere les pages d'annee correspondantes.
+  /// [cheminsPlateformes]/[cheminsAnnees] : chemins complets (/game-
+  /// soundtracks/...), pas de simples slugs — ils viennent tels quels de
+  /// Kh.liensIndex (meme source que le bouton "Toutes" de Parcourir), pour
+  /// couvrir la liste reelle et complete du site, pas une liste figee.
+  Future<List<Album>> _tirageFiltre({
+    required List<String> cheminsPlateformes,
+    required List<String> cheminsAnnees,
+    required int nombre,
+  }) async {
+    List<Album> bassin;
+
+    if (cheminsPlateformes.isNotEmpty) {
+      final listes = await Future.wait(cheminsPlateformes.map(Kh.liste));
+      bassin = listes.expand((l) => l).toList();
+      if (cheminsAnnees.isNotEmpty) {
+        final anneesTexte = cheminsAnnees
+            .map((c) => RegExp(r'(\d{4})$').firstMatch(c)?.group(1))
+            .whereType<String>()
+            .toSet();
+        bassin = bassin.where((a) => anneesTexte.contains(a.annee)).toList();
+      }
+    } else if (cheminsAnnees.isNotEmpty) {
+      final listes = await Future.wait(cheminsAnnees.map(Kh.liste));
+      bassin = listes.expand((l) => l).toList();
+    } else {
+      return _tirageAuHasard(nombre: nombre);
+    }
+
+    final vus = <String>{};
+    bassin = bassin.where((a) => vus.add(a.slug)).toList();
+    bassin.shuffle();
+    return bassin.take(nombre).toList();
+  }
+
+  void _ouvrirRequeteur(BuildContext context) {
+    Navigator.of(context).push(MaterialPageRoute(
+      builder: (_) => PageRequeteur(tirage: _tirageFiltre),
+    ));
+  }
+}
+
+/// Page complete (pas une fenetre modale : trop de plateformes/annees pour
+/// rester confortable en modal) pour choisir plateformes, annees et nombre
+/// d'albums avant un tirage au hasard filtre.
+class PageRequeteur extends StatefulWidget {
+  final Future<List<Album>> Function({
+    required List<String> cheminsPlateformes,
+    required List<String> cheminsAnnees,
+    required int nombre,
+  }) tirage;
+
+  const PageRequeteur({super.key, required this.tirage});
+
+  @override
+  State<PageRequeteur> createState() => _PageRequeteurState();
+}
+
+class _PageRequeteurState extends State<PageRequeteur> {
+  static const _typesExclus = PageParcourir._typesExclus;
+
+  late Future<List<List<LienIndex>>> _futur;
+  final _cheminsPlateformesChoisis = <String>{};
+  final _cheminsAnneesChoisis = <String>{};
+  final _controleurNombre = TextEditingController(text: '10');
+
+  @override
+  void initState() {
+    super.initState();
+    _futur = Future.wait([
+      Kh.liensIndex(
+        '/console-list',
+        RegExp(r'^/game-soundtracks/[a-z0-9-]+$'),
+        exclure: _typesExclus,
+      ),
+      Kh.liensIndex(
+        '/album-years',
+        RegExp(r'^/game-soundtracks/year/(19|20)\d{2}$'),
+      ),
+    ]);
+  }
+
+  @override
+  void dispose() {
+    _controleurNombre.dispose();
+    super.dispose();
+  }
+
+  void _lancer() {
+    final nombre = int.tryParse(_controleurNombre.text.trim()) ?? 10;
+    final cheminsPlateformes = _cheminsPlateformesChoisis.toList();
+    final cheminsAnnees = _cheminsAnneesChoisis.toList();
+
+    Navigator.of(context).push(MaterialPageRoute(
+      builder: (_) => PageListeAlbums(
+        titre: 'Tirage filtré',
+        chemin: '',
+        chargeur: () => widget.tirage(
+          cheminsPlateformes: cheminsPlateformes,
+          cheminsAnnees: cheminsAnnees,
+          nombre: nombre,
+        ),
+      ),
+    ));
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('Tirage filtré'),
+        actions: [
+          IconButton(
+            tooltip: 'Lancer',
+            icon: const Icon(Icons.shuffle, color: kAmber),
+            onPressed: _lancer,
+          ),
+        ],
+      ),
+      body: FutureBuilder<List<List<LienIndex>>>(
+        future: _futur,
+        builder: (context, snap) {
+          if (snap.connectionState == ConnectionState.waiting) {
+            return const Center(child: CircularProgressIndicator(color: kAmber));
+          }
+          if (snap.hasError) {
+            return Center(
+              child: Text('${snap.error}', style: const TextStyle(color: kMuted)),
+            );
+          }
+          final plateformesDispo = snap.data![0];
+          final anneesDispo = snap.data![1];
+
+          return ListView(
+            // Marge basse dynamique : sans elle, les derniers elements se
+            // retrouvent caches sous la barre de navigation systeme, cette
+            // page n'ayant pas de bottomNavigationBar pour la reserver.
+            padding: EdgeInsets.fromLTRB(
+                14, 14, 14, 24 + MediaQuery.paddingOf(context).bottom),
+            children: [
+              TextField(
+                controller: _controleurNombre,
+                keyboardType: TextInputType.number,
+                style: const TextStyle(color: kText),
+                decoration: const InputDecoration(labelText: "Nombre d'albums"),
+              ),
+              const SizedBox(height: 20),
+              Text('Plateformes (optionnel, ${plateformesDispo.length})',
+                  style: const TextStyle(
+                      color: kText, fontSize: 16, fontWeight: FontWeight.bold)),
+              const SizedBox(height: 10),
+              Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: [
+                  for (final p in plateformesDispo)
+                    FilterChip(
+                      label: Text(p.libelle),
+                      selected: _cheminsPlateformesChoisis.contains(p.chemin),
+                      onSelected: (v) => setState(() {
+                        if (v) {
+                          _cheminsPlateformesChoisis.add(p.chemin);
+                        } else {
+                          _cheminsPlateformesChoisis.remove(p.chemin);
+                        }
+                      }),
+                    ),
+                ],
+              ),
+              const SizedBox(height: 24),
+              Text('Années (optionnel, ${anneesDispo.length})',
+                  style: const TextStyle(
+                      color: kText, fontSize: 16, fontWeight: FontWeight.bold)),
+              const SizedBox(height: 10),
+              Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: [
+                  for (final a in anneesDispo)
+                    FilterChip(
+                      label: Text(a.libelle),
+                      selected: _cheminsAnneesChoisis.contains(a.chemin),
+                      onSelected: (v) => setState(() {
+                        if (v) {
+                          _cheminsAnneesChoisis.add(a.chemin);
+                        } else {
+                          _cheminsAnneesChoisis.remove(a.chemin);
+                        }
+                      }),
+                    ),
+                ],
+              ),
+            ],
+          );
+        },
       ),
     );
-
-    try {
-      final slug = await Kh.albumAuHasard();
-      if (!context.mounted) return;
-      Navigator.of(context).pop(); // ferme le dialogue de chargement
-      Navigator.of(context).push(MaterialPageRoute(
-        builder: (_) => PageAlbum(slug: slug),
-      ));
-    } catch (e) {
-      if (!context.mounted) return;
-      Navigator.of(context).pop();
-      messenger.showSnackBar(SnackBar(content: Text('$e')));
-    }
   }
 }
 
@@ -231,7 +447,16 @@ class PageListeAlbums extends StatefulWidget {
   final String titre;
   final String chemin;
 
-  const PageListeAlbums({super.key, required this.titre, required this.chemin});
+  /// Source alternative a Kh.liste(chemin) — utilise par ex. par "Album au
+  /// hasard" pour afficher un tirage local plutot qu'une page du site.
+  final Future<List<Album>> Function()? chargeur;
+
+  const PageListeAlbums({
+    super.key,
+    required this.titre,
+    required this.chemin,
+    this.chargeur,
+  });
 
   @override
   State<PageListeAlbums> createState() => _PageListeAlbumsState();
@@ -240,10 +465,13 @@ class PageListeAlbums extends StatefulWidget {
 class _PageListeAlbumsState extends State<PageListeAlbums> {
   late Future<List<Album>> _futur;
 
+  Future<List<Album>> _charger() =>
+      widget.chargeur != null ? widget.chargeur!() : Kh.liste(widget.chemin);
+
   @override
   void initState() {
     super.initState();
-    _futur = Kh.liste(widget.chemin);
+    _futur = _charger();
   }
 
   void _reessayer() {
@@ -251,7 +479,7 @@ class _PageListeAlbumsState extends State<PageListeAlbums> {
     // setState n'appellerait jamais markNeedsBuild (voir _lancer dans
     // main.dart pour le meme piege deja rencontre sur la recherche).
     setState(() {
-      _futur = Kh.liste(widget.chemin);
+      _futur = _charger();
     });
   }
 
