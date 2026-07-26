@@ -127,6 +127,51 @@ def patch_activite():
             print(f'{f} traite.')
 
 
+def patch_shrink_resources():
+    """Desactive shrinkResources pour le build release.
+
+    audio_service fournit ses icones de notification (play/pause/skip...)
+    comme ressources bundlees, recherchees au runtime par nom via
+    getIdentifier() plutot que par reference R.drawable statique. L'analyse
+    statique du "resource shrinker" d'Android ne voit donc aucune reference
+    a ces drawables et les supprime du build release comme "inutilises" :
+    au premier essai de construction de la notification, l'icone recherchee
+    vaut alors 0, ce qui fait planter audio_service avec
+    "You must specify an icon resource id to build a CustomAction" — et donc
+    aucune notification ne s'affiche jamais en release (marchait en debug,
+    ou shrinkResources est desactive par defaut).
+    """
+    fichiers = [f for f in ('android/app/build.gradle.kts', 'android/app/build.gradle')
+                if os.path.isfile(f)]
+    if not fichiers:
+        erreurs.append('build.gradle introuvable')
+        return
+
+    for f in fichiers:
+        src = open(f, encoding='utf-8').read()
+        avant = src
+
+        if 'isShrinkResources' not in src and 'shrinkResources' not in src:
+            if f.endswith('.kts'):
+                src, n = re.subn(r'(release\s*\{)', r'\1\n            isShrinkResources = false',
+                                 src, count=1)
+            else:
+                src, n = re.subn(r'(release\s*\{)', r'\1\n            shrinkResources false',
+                                 src, count=1)
+            if n == 0:
+                erreurs.append(f'{f} : bloc release introuvable pour shrinkResources')
+
+        if src != avant:
+            open(f, 'w', encoding='utf-8').write(src)
+            print(f'{f} : shrinkResources desactive.')
+        else:
+            print(f'{f} : shrinkResources deja configure.')
+
+        final = open(f, encoding='utf-8').read()
+        if 'isShrinkResources = false' not in final and 'shrinkResources false' not in final:
+            erreurs.append(f'{f} : shrinkResources toujours actif apres patch')
+
+
 def patch_min_sdk():
     """audio_service exige minSdk 23 ; Flutter genere parfois une valeur plus basse."""
     fichiers = [f for f in ('android/app/build.gradle.kts', 'android/app/build.gradle')
@@ -161,6 +206,7 @@ def patch_min_sdk():
 if __name__ == '__main__':
     patch_manifeste()
     patch_activite()
+    patch_shrink_resources()
     patch_min_sdk()
 
     if erreurs:
