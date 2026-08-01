@@ -303,7 +303,7 @@ class _MiniLecteur extends StatelessWidget {
                           IconButton(
                             tooltip: 'Stop',
                             icon: const Icon(Icons.stop, color: kMuted),
-                            onPressed: lecteur.stop,
+                            onPressed: Lecteur.instance.arreter,
                           ),
                         ],
                       );

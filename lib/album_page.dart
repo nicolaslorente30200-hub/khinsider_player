@@ -213,6 +213,8 @@ class _PageAlbumState extends State<PageAlbum> {
                       ),
                     ),
                     _listePistes(album),
+                    SliverToBoxAdapter(child: _description(album)),
+                    SliverToBoxAdapter(child: _similaires(album)),
                   ],
                 )),
       bottomNavigationBar: ValueListenableBuilder<List<Piste>>(
@@ -357,6 +359,78 @@ class _PageAlbumState extends State<PageAlbum> {
     );
   }
 
+  /// Bloc "Platforms/Year/Developed by/..." de la page album du site,
+  /// affiche sous la liste des pistes.
+  Widget _description(AlbumDetail album) {
+    if (album.description.isEmpty) return const SizedBox.shrink();
+    return Container(
+      margin: const EdgeInsets.fromLTRB(14, 8, 14, 0),
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: kSurface,
+        border: Border.all(color: kLine),
+        borderRadius: BorderRadius.circular(10),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text('Description',
+              style: TextStyle(color: kText, fontSize: 15, fontWeight: FontWeight.bold)),
+          const SizedBox(height: 8),
+          Text(album.description,
+              style: const TextStyle(color: kMuted, fontSize: 13, height: 1.5)),
+        ],
+      ),
+    );
+  }
+
+  /// Section "People who viewed this also viewed" de la page album du site.
+  Widget _similaires(AlbumDetail album) {
+    if (album.similaires.isEmpty) return const SizedBox.shrink();
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(14, 20, 14, 20),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text('Suggestions',
+              style: TextStyle(color: kText, fontSize: 15, fontWeight: FontWeight.bold)),
+          const SizedBox(height: 10),
+          SizedBox(
+            height: 170,
+            child: ListView.separated(
+              scrollDirection: Axis.horizontal,
+              itemCount: album.similaires.length,
+              separatorBuilder: (_, __) => const SizedBox(width: 10),
+              itemBuilder: (context, i) {
+                final a = album.similaires[i];
+                return SizedBox(
+                  width: 110,
+                  child: InkWell(
+                    borderRadius: BorderRadius.circular(10),
+                    onTap: () => Navigator.of(context).push(
+                      MaterialPageRoute(builder: (_) => PageAlbum(slug: a.slug)),
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Pochette(url: a.pochette, taille: 110, titre: a.titre),
+                        const SizedBox(height: 6),
+                        Text(a.titre,
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(color: kText, fontSize: 12.5)),
+                      ],
+                    ),
+                  ),
+                );
+              },
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _barreLecteur() {
     return Container(
       decoration: const BoxDecoration(
@@ -426,6 +500,13 @@ class _PageAlbumState extends State<PageAlbum> {
                 );
               },
             ),
+            // Espace avant les boutons : sans lui, le curseur de la barre de
+            // progression juste au-dessus est trop proche du bouton lecture/
+            // pause, au point de le declencher par erreur en manipulant la
+            // barre. Le bouton lecture/pause est aussi reduit (mini) pour la
+            // meme raison, et rapproche visuellement des boutons precedent/
+            // suivant plutot que de s'en demarquer par sa taille.
+            const SizedBox(height: 12),
             Row(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
@@ -434,12 +515,13 @@ class _PageAlbumState extends State<PageAlbum> {
                   onPressed:
                       _lecteur.hasPrevious ? _lecteur.seekToPrevious : null,
                 ),
-                const SizedBox(width: 18),
+                const SizedBox(width: 12),
                 StreamBuilder<PlayerState>(
                   stream: _lecteur.playerStateStream,
                   builder: (context, snap) {
                     final enLecture = snap.data?.playing ?? false;
                     return FloatingActionButton(
+                      mini: true,
                       backgroundColor: kAmber,
                       foregroundColor: const Color(0xFF1A1206),
                       elevation: 0,
@@ -448,10 +530,16 @@ class _PageAlbumState extends State<PageAlbum> {
                     );
                   },
                 ),
-                const SizedBox(width: 18),
+                const SizedBox(width: 12),
                 IconButton(
                   icon: const Icon(Icons.skip_next, color: kText),
                   onPressed: _lecteur.hasNext ? _lecteur.seekToNext : null,
+                ),
+                const SizedBox(width: 12),
+                IconButton(
+                  tooltip: 'Stop',
+                  icon: const Icon(Icons.stop, color: kMuted),
+                  onPressed: Lecteur.instance.arreter,
                 ),
               ],
             ),

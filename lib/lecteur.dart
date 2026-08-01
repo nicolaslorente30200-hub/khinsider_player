@@ -258,4 +258,16 @@ class Lecteur {
       },
     );
   }
+
+  /// Stop plein : contrairement a player.stop() seul, referme aussi le
+  /// mini-lecteur (slugActif conditionne son affichage dans main.dart).
+  Future<void> arreter() async {
+    await player.stop();
+    _suiviErreurs?.cancel();
+    _suiviErreurs = null;
+    _album = null;
+    pistesEnFile.value = [];
+    echecs.value = 0;
+    slugActif.value = null;
+  }
 }

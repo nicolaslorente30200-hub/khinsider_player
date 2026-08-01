@@ -126,6 +126,13 @@ class AlbumDetail {
   final String annee;
   final List<Piste> pistes;
 
+  /// Bloc "Platforms / Year / Developed by / ..." de la page album, mis en
+  /// forme pour affichage — equivalent de la description du site web.
+  final String description;
+
+  /// Section "People who viewed this also viewed" de la page album.
+  final List<Album> similaires;
+
   AlbumDetail({
     required this.slug,
     required this.titre,
@@ -133,6 +140,8 @@ class AlbumDetail {
     this.infos = '',
     this.annee = '',
     required this.pistes,
+    this.description = '',
+    this.similaires = const [],
   });
 }
 
@@ -383,6 +392,58 @@ class Kh {
     final type = valeur('Album type');
     final annee = RegExp(r'(19|20)\d{2}').firstMatch(valeur('Year'))?.group(0) ?? '';
 
+    // Description : meme bloc d'infos que la page web (Platforms/Year/
+    // Developed by/Published by/Number of Files/Total Filesize/Date Added/
+    // Uploaded by), mis en forme pour affichage sous la liste des pistes.
+    final champsDescription = [
+      ('Plateformes', plateformes),
+      ('Année', valeur('Year')),
+      ('Type', type),
+      ('Développé par', valeur('Developed by')),
+      ('Publié par', valeur('Published by')),
+      ('Nombre de fichiers', valeur('Number of Files')),
+      ('Taille totale', valeur('Total Filesize')),
+      ('Ajouté le', valeur('Date Added')),
+      ('Mis en ligne par', valeur('Uploaded by')),
+    ];
+    final description = [
+      for (final (libelle, valeurChamp) in champsDescription)
+        if (valeurChamp.isNotEmpty) '$libelle : $valeurChamp',
+    ].join('\n');
+
+    // Similaires : section "People who viewed this also viewed"
+    final similaires = <Album>[];
+    for (final h2 in doc.querySelectorAll('h2')) {
+      if (!h2.text.toLowerCase().contains('people who viewed')) continue;
+      var suivant = h2.nextElementSibling;
+      while (suivant != null && suivant.localName != 'table') {
+        suivant = suivant.nextElementSibling;
+      }
+      if (suivant == null) break;
+
+      for (final td in suivant.querySelectorAll('td.albumIconLarge')) {
+        final a = td.querySelector('a');
+        final hrefSim = a?.attributes['href'] ?? '';
+        final mSlug = _reSlug.firstMatch(hrefSim);
+        if (mSlug == null) continue;
+
+        final img = td.querySelector('img')?.attributes['src'];
+        var texte =
+            (td.querySelector('p')?.text ?? '').replaceAll(RegExp(r'\s+'), ' ').trim();
+        final mAnnee = RegExp(r'\((\d{4})\)\s*$').firstMatch(texte);
+        final anneeSim = mAnnee?.group(1) ?? '';
+        if (mAnnee != null) texte = texte.substring(0, mAnnee.start).trim();
+
+        similaires.add(Album(
+          slug: mSlug.group(1)!,
+          titre: texte,
+          pochette: img != null ? assainir(img) : null,
+          annee: anneeSim,
+        ));
+      }
+      break;
+    }
+
     // Pistes : tableau #songlist
     final pistes = <Piste>[];
     final vus = <String>{};
@@ -429,6 +490,8 @@ class Kh {
       infos: [plateformes, type].where((s) => s.isNotEmpty).join(' · '),
       annee: annee,
       pistes: pistes,
+      description: description,
+      similaires: similaires,
     );
   }
 
