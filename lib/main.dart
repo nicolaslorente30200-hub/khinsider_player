@@ -2,21 +2,117 @@ import 'package:flutter/material.dart';
 import 'package:just_audio/just_audio.dart';
 import 'package:just_audio_background/just_audio_background.dart';
 import 'package:permission_handler/permission_handler.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import 'album_page.dart';
 import 'khinsider.dart';
 import 'lecteur.dart';
 import 'parcourir.dart';
 
-// Palette reprise de l'interface web
-const kBg = Color(0xFF14171C);
-const kSurface = Color(0xFF1E232B);
-const kSurface2 = Color(0xFF262C36);
-const kLine = Color(0xFF313945);
-const kText = Color(0xFFE8E4DA);
-const kMuted = Color(0xFF8A919C);
-const kAmber = Color(0xFFF2A33C);
-const kAmberDim = Color(0xFF8A5E24);
+/// Un jeu de couleurs complet. Remplace l'ancien schema de constantes fixes
+/// pour permettre un changement de theme en direct (voir PageParametres) :
+/// kBg/kAmber/etc. ci-dessous restent le point d'acces utilise partout dans
+/// l'app, mais lisent desormais la palette courante plutot qu'une valeur
+/// figee a la compilation.
+class Palette {
+  final String nom;
+  final Brightness luminosite;
+  final Color fond, surface, surface2, ligne, texte, attenue, accent, accentAttenue;
+
+  const Palette({
+    required this.nom,
+    required this.luminosite,
+    required this.fond,
+    required this.surface,
+    required this.surface2,
+    required this.ligne,
+    required this.texte,
+    required this.attenue,
+    required this.accent,
+    required this.accentAttenue,
+  });
+}
+
+const List<Palette> palettes = [
+  Palette(
+    nom: 'Ambre (défaut)',
+    luminosite: Brightness.dark,
+    fond: Color(0xFF14171C),
+    surface: Color(0xFF1E232B),
+    surface2: Color(0xFF262C36),
+    ligne: Color(0xFF313945),
+    texte: Color(0xFFE8E4DA),
+    attenue: Color(0xFF8A919C),
+    accent: Color(0xFFF2A33C),
+    accentAttenue: Color(0xFF8A5E24),
+  ),
+  Palette(
+    nom: 'Bleu',
+    luminosite: Brightness.dark,
+    fond: Color(0xFF10151C),
+    surface: Color(0xFF1A222D),
+    surface2: Color(0xFF212B38),
+    ligne: Color(0xFF2E3A48),
+    texte: Color(0xFFE4E9EF),
+    attenue: Color(0xFF8996A6),
+    accent: Color(0xFF4FA3E3),
+    accentAttenue: Color(0xFF2A5A85),
+  ),
+  Palette(
+    nom: 'Vert',
+    luminosite: Brightness.dark,
+    fond: Color(0xFF121A15),
+    surface: Color(0xFF1B261E),
+    surface2: Color(0xFF223028),
+    ligne: Color(0xFF304038),
+    texte: Color(0xFFE3ECE5),
+    attenue: Color(0xFF8CA495),
+    accent: Color(0xFF5BC286),
+    accentAttenue: Color(0xFF2F6B48),
+  ),
+  Palette(
+    nom: 'Clair',
+    luminosite: Brightness.light,
+    fond: Color(0xFFF7F5F1),
+    surface: Color(0xFFFFFFFF),
+    surface2: Color(0xFFEFEBE3),
+    ligne: Color(0xFFDAD4C8),
+    texte: Color(0xFF201C15),
+    attenue: Color(0xFF6B6558),
+    accent: Color(0xFFC97A1E),
+    accentAttenue: Color(0xFFE7B87A),
+  ),
+];
+
+const _clePaletteChoisie = 'palette_choisie';
+
+/// Palette active — modifiee depuis PageParametres, persistee dans
+/// SharedPreferences, chargee au demarrage dans main() avant runApp().
+final ValueNotifier<Palette> paletteNotifier = ValueNotifier<Palette>(palettes.first);
+
+Future<void> chargerPaletteEnregistree() async {
+  final prefs = await SharedPreferences.getInstance();
+  final nom = prefs.getString(_clePaletteChoisie);
+  final trouvee = palettes.where((p) => p.nom == nom).firstOrNull;
+  if (trouvee != null) paletteNotifier.value = trouvee;
+}
+
+Future<void> choisirPalette(Palette p) async {
+  paletteNotifier.value = p;
+  final prefs = await SharedPreferences.getInstance();
+  await prefs.setString(_clePaletteChoisie, p.nom);
+}
+
+// Points d'acces utilises partout dans l'app — plus des constantes figees,
+// mais des getters qui refletent la palette courante (voir Palette).
+Color get kBg => paletteNotifier.value.fond;
+Color get kSurface => paletteNotifier.value.surface;
+Color get kSurface2 => paletteNotifier.value.surface2;
+Color get kLine => paletteNotifier.value.ligne;
+Color get kText => paletteNotifier.value.texte;
+Color get kMuted => paletteNotifier.value.attenue;
+Color get kAmber => paletteNotifier.value.accent;
+Color get kAmberDim => paletteNotifier.value.accentAttenue;
 
 /// Numero de compilation, injecte par GitHub Actions (--dart-define).
 const String kVersion = String.fromEnvironment('VERSION', defaultValue: 'dev');
@@ -27,6 +123,7 @@ final ValueNotifier<String> filtrePage = ValueNotifier<String>('');
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  await chargerPaletteEnregistree();
 
   // Active la lecture en arriere-plan et les controles systeme.
   //
@@ -67,31 +164,42 @@ class KhApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return MaterialApp(
-      title: 'KHINSIDER·ost',
-      debugShowCheckedModeBanner: false,
-      theme: ThemeData(
-        useMaterial3: true,
-        brightness: Brightness.dark,
-        scaffoldBackgroundColor: kBg,
-        colorScheme: const ColorScheme.dark(
-          primary: kAmber,
-          surface: kSurface,
-          onSurface: kText,
-        ),
-        appBarTheme: const AppBarTheme(
-          backgroundColor: kBg,
-          foregroundColor: kText,
-          elevation: 0,
-        ),
-      ),
-      home: const Accueil(),
+    return ValueListenableBuilder<Palette>(
+      valueListenable: paletteNotifier,
+      builder: (context, palette, _) {
+        return MaterialApp(
+          title: 'KHINSIDER·ost',
+          debugShowCheckedModeBanner: false,
+          theme: ThemeData(
+            useMaterial3: true,
+            brightness: palette.luminosite,
+            scaffoldBackgroundColor: palette.fond,
+            colorScheme: ColorScheme(
+              brightness: palette.luminosite,
+              primary: palette.accent,
+              onPrimary: palette.fond,
+              secondary: palette.accent,
+              onSecondary: palette.fond,
+              surface: palette.surface,
+              onSurface: palette.texte,
+              error: const Color(0xFFCF6679),
+              onError: palette.fond,
+            ),
+            appBarTheme: AppBarTheme(
+              backgroundColor: palette.fond,
+              foregroundColor: palette.texte,
+              elevation: 0,
+            ),
+          ),
+          home: Accueil(),
+        );
+      },
     );
   }
 }
 
 class Accueil extends StatefulWidget {
-  const Accueil({super.key});
+  Accueil({super.key});
 
   @override
   State<Accueil> createState() => _AccueilState();
@@ -122,8 +230,8 @@ class _AccueilState extends State<Accueil> {
             ? TextField(
                 controller: _controleurFiltre,
                 autofocus: true,
-                style: const TextStyle(color: kText),
-                decoration: const InputDecoration(
+                style: TextStyle(color: kText),
+                decoration: InputDecoration(
                   hintText: 'Filtrer cette page…',
                   hintStyle: TextStyle(color: kMuted),
                   border: InputBorder.none,
@@ -131,7 +239,7 @@ class _AccueilState extends State<Accueil> {
                 onChanged: (v) => filtrePage.value = v,
               )
             : RichText(
-          text: const TextSpan(
+          text: TextSpan(
             style: TextStyle(
               fontSize: 20,
               fontWeight: FontWeight.bold,
@@ -158,13 +266,13 @@ class _AccueilState extends State<Accueil> {
           ),
           IconButton(
             tooltip: 'Informations',
-            icon: const Icon(Icons.info_outline, color: kAmber),
+            icon: Icon(Icons.info_outline, color: kAmber),
             onPressed: () => showDialog<void>(
               context: context,
               builder: (_) => AlertDialog(
                 backgroundColor: kSurface,
-                title: const Text('KHINSIDER·ost', style: TextStyle(color: kText)),
-                content: const Column(
+                title: Text('KHINSIDER·ost', style: TextStyle(color: kText)),
+                content: Column(
                   mainAxisSize: MainAxisSize.min,
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
@@ -177,22 +285,29 @@ class _AccueilState extends State<Accueil> {
                 actions: [
                   TextButton(
                     onPressed: () => Navigator.of(context).pop(),
-                    child: const Text('Fermer'),
+                    child: Text('Fermer'),
                   ),
                 ],
               ),
+            ),
+          ),
+          IconButton(
+            tooltip: 'Paramètres',
+            icon: Icon(Icons.settings_outlined, color: kAmber),
+            onPressed: () => Navigator.of(context).push(
+              MaterialPageRoute(builder: (_) => const PageParametres()),
             ),
           ),
         ],
       ),
       body: IndexedStack(
         index: _onglet,
-        children: const [PageNouveautes(), PageParcourir(), PageRecherche()],
+        children: [PageNouveautes(), PageParcourir(), PageRecherche()],
       ),
       bottomNavigationBar: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          const _MiniLecteur(),
+          _MiniLecteur(),
           NavigationBar(
             backgroundColor: kSurface,
             indicatorColor: kAmberDim,
@@ -205,7 +320,7 @@ class _AccueilState extends State<Accueil> {
             // selectionnee prend une teinte calculee par le theme Material3
             // (onSecondaryContainer), differente du orange exact (kAmber)
             // utilise explicitement partout ailleurs dans l'app.
-            destinations: const [
+            destinations: [
               NavigationDestination(
                 icon: Icon(Icons.new_releases_outlined, color: kMuted),
                 selectedIcon: Icon(Icons.new_releases, color: kAmber),
@@ -253,7 +368,7 @@ class _MiniLecteur extends StatelessWidget {
               MaterialPageRoute(builder: (_) => PageAlbum(slug: slug)),
             ),
             child: Container(
-              decoration: const BoxDecoration(
+              decoration: BoxDecoration(
                 border: Border(top: BorderSide(color: kLine)),
               ),
               padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
@@ -274,7 +389,7 @@ class _MiniLecteur extends StatelessWidget {
                               item?.title ?? album?.titre ?? '…',
                               maxLines: 1,
                               overflow: TextOverflow.ellipsis,
-                              style: const TextStyle(
+                              style: TextStyle(
                                   color: kText, fontSize: 13, fontWeight: FontWeight.w600),
                             ),
                             if (album != null)
@@ -282,7 +397,7 @@ class _MiniLecteur extends StatelessWidget {
                                 album.titre,
                                 maxLines: 1,
                                 overflow: TextOverflow.ellipsis,
-                                style: const TextStyle(color: kMuted, fontSize: 11.5),
+                                style: TextStyle(color: kMuted, fontSize: 11.5),
                               ),
                           ],
                         );
@@ -302,7 +417,7 @@ class _MiniLecteur extends StatelessWidget {
                           ),
                           IconButton(
                             tooltip: 'Stop',
-                            icon: const Icon(Icons.stop, color: kMuted),
+                            icon: Icon(Icons.stop, color: kMuted),
                             onPressed: Lecteur.instance.arreter,
                           ),
                         ],
@@ -362,14 +477,14 @@ class _PageNouveautesState extends State<PageNouveautes>
         future: _futur,
         builder: (context, snap) {
           if (snap.connectionState == ConnectionState.waiting) {
-            return const Center(child: CircularProgressIndicator(color: kAmber));
+            return Center(child: CircularProgressIndicator(color: kAmber));
           }
           if (snap.hasError) {
             return _Erreur(message: '${snap.error}', onRetry: _rafraichir);
           }
           final albums = snap.data ?? [];
           if (albums.isEmpty) {
-            return const Center(
+            return Center(
               child: Text('Aucune nouveauté trouvée.',
                   style: TextStyle(color: kMuted)),
             );
@@ -387,19 +502,61 @@ class _PageNouveautesState extends State<PageNouveautes>
                           a.annee.toLowerCase().contains(q))
                       .toList();
               if (visibles.isEmpty) {
-                return const Center(
+                return Center(
                   child: Text('Aucun résultat pour ce filtre.',
                       style: TextStyle(color: kMuted)),
                 );
               }
+
+              // Intercale un en-tete de jour avant chaque groupe (comme sur
+              // le site web) : Album.jour n'est rempli que sur cette page
+              // (section "Latest" de l'accueil khinsider), vide ailleurs.
+              final elements = <Object>[];
+              String? dernierJour;
+              for (final a in visibles) {
+                if (a.jour.isNotEmpty && a.jour != dernierJour) {
+                  elements.add(a.jour);
+                  dernierJour = a.jour;
+                }
+                elements.add(a);
+              }
+
               return ListView.builder(
                 padding: const EdgeInsets.all(12),
-                itemCount: visibles.length,
-                itemBuilder: (_, i) => CarteAlbum(album: visibles[i]),
+                itemCount: elements.length,
+                itemBuilder: (_, i) {
+                  final e = elements[i];
+                  if (e is String) return _EnTeteJour(libelle: e);
+                  return CarteAlbum(album: e as Album);
+                },
               );
             },
           );
         },
+      ),
+    );
+  }
+}
+
+/// En-tete de groupe de jour, style repris de la page web (libelle + trait).
+class _EnTeteJour extends StatelessWidget {
+  final String libelle;
+  const _EnTeteJour({required this.libelle});
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.only(top: 10, bottom: 8),
+      child: Row(
+        children: [
+          Text(
+            libelle.toUpperCase(),
+            style: TextStyle(
+                color: kAmber, fontSize: 12.5, fontWeight: FontWeight.w600, letterSpacing: 0.4),
+          ),
+          const SizedBox(width: 10),
+          Expanded(child: Divider(color: kLine, height: 1)),
+        ],
       ),
     );
   }
@@ -448,20 +605,20 @@ class _PageRechercheState extends State<PageRecherche>
           padding: const EdgeInsets.fromLTRB(12, 12, 12, 4),
           child: TextField(
             controller: _controleur,
-            style: const TextStyle(color: kText),
+            style: TextStyle(color: kText),
             textInputAction: TextInputAction.search,
             onSubmitted: (_) => _lancer(),
             decoration: InputDecoration(
               hintText: 'Rechercher un jeu, un album…',
-              hintStyle: const TextStyle(color: kMuted),
+              hintStyle: TextStyle(color: kMuted),
               filled: true,
               fillColor: kSurface,
               border: OutlineInputBorder(
                 borderRadius: BorderRadius.circular(10),
-                borderSide: const BorderSide(color: kLine),
+                borderSide: BorderSide(color: kLine),
               ),
               suffixIcon: IconButton(
-                icon: const Icon(Icons.search, color: kAmber),
+                icon: Icon(Icons.search, color: kAmber),
                 onPressed: _lancer,
               ),
             ),
@@ -469,7 +626,7 @@ class _PageRechercheState extends State<PageRecherche>
         ),
         Expanded(
           child: _futur == null
-              ? const Center(
+              ? Center(
                   child: Text('Tape le nom d\'un jeu ou d\'un album.',
                       style: TextStyle(color: kMuted)),
                 )
@@ -477,7 +634,7 @@ class _PageRechercheState extends State<PageRecherche>
                   future: _futur,
                   builder: (context, snap) {
                     if (snap.connectionState == ConnectionState.waiting) {
-                      return const Center(
+                      return Center(
                           child: CircularProgressIndicator(color: kAmber));
                     }
                     if (snap.hasError) {
@@ -485,7 +642,7 @@ class _PageRechercheState extends State<PageRecherche>
                     }
                     final albums = snap.data ?? [];
                     if (albums.isEmpty) {
-                      return const Center(
+                      return Center(
                         child: Text('Aucun résultat.',
                             style: TextStyle(color: kMuted)),
                       );
@@ -516,7 +673,7 @@ class CarteAlbum extends StatelessWidget {
       margin: const EdgeInsets.only(bottom: 8),
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(14),
-        side: const BorderSide(color: kLine),
+        side: BorderSide(color: kLine),
       ),
       child: InkWell(
         borderRadius: BorderRadius.circular(14),
@@ -536,7 +693,7 @@ class CarteAlbum extends StatelessWidget {
                   children: [
                     Text(
                       album.titre,
-                      style: const TextStyle(
+                      style: TextStyle(
                         color: kText,
                         fontWeight: FontWeight.w600,
                         fontSize: 14.5,
@@ -545,12 +702,12 @@ class CarteAlbum extends StatelessWidget {
                     if (album.infos.isNotEmpty) ...[
                       const SizedBox(height: 4),
                       Text(album.infos,
-                          style: const TextStyle(color: kMuted, fontSize: 12.5)),
+                          style: TextStyle(color: kMuted, fontSize: 12.5)),
                     ],
                     if (album.annee.isNotEmpty) ...[
                       const SizedBox(height: 3),
                       Text(album.annee,
-                          style: const TextStyle(
+                          style: TextStyle(
                               color: kAmberDim,
                               fontSize: 13,
                               fontWeight: FontWeight.w600)),
@@ -631,23 +788,86 @@ class _Erreur extends StatelessWidget {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            const Icon(Icons.cloud_off, color: kMuted, size: 36),
+            Icon(Icons.cloud_off, color: kMuted, size: 36),
             const SizedBox(height: 12),
             Text(message,
                 textAlign: TextAlign.center,
-                style: const TextStyle(color: kMuted, fontSize: 13)),
+                style: TextStyle(color: kMuted, fontSize: 13)),
             const SizedBox(height: 16),
             OutlinedButton(
               onPressed: onRetry,
               style: OutlinedButton.styleFrom(
                 foregroundColor: kAmber,
-                side: const BorderSide(color: kAmberDim),
+                side: BorderSide(color: kAmberDim),
               ),
               child: const Text('Réessayer'),
             ),
           ],
         ),
       ),
+    );
+  }
+}
+
+class PageParametres extends StatelessWidget {
+  const PageParametres({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: kBg,
+      appBar: AppBar(
+        title: Text('Paramètres', style: TextStyle(color: kText)),
+      ),
+      body: ListView(
+        padding: EdgeInsets.fromLTRB(16, 16, 16, 16 + MediaQuery.paddingOf(context).bottom),
+        children: [
+          Text('Thème de couleur',
+              style: TextStyle(color: kMuted, fontSize: 13, fontWeight: FontWeight.bold)),
+          const SizedBox(height: 12),
+          ValueListenableBuilder<Palette>(
+            valueListenable: paletteNotifier,
+            builder: (context, actuelle, _) {
+              return Column(
+                children: palettes.map((p) {
+                  final selectionnee = p.nom == actuelle.nom;
+                  return Card(
+                    color: kSurface,
+                    margin: const EdgeInsets.only(bottom: 10),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(10),
+                      side: BorderSide(color: selectionnee ? kAmber : kLine),
+                    ),
+                    child: ListTile(
+                      onTap: () => choisirPalette(p),
+                      leading: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          _pastilleCouleur(p.accent),
+                          const SizedBox(width: 4),
+                          _pastilleCouleur(p.fond),
+                        ],
+                      ),
+                      title: Text(p.nom, style: TextStyle(color: kText)),
+                      trailing: selectionnee
+                          ? Icon(Icons.check_circle, color: kAmber)
+                          : null,
+                    ),
+                  );
+                }).toList(),
+              );
+            },
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _pastilleCouleur(Color c) {
+    return Container(
+      width: 20,
+      height: 20,
+      decoration: BoxDecoration(color: c, shape: BoxShape.circle),
     );
   }
 }

@@ -35,6 +35,38 @@ final RegExp _reRangIcone = RegExp(r'^[a-z_]+([+-]\d+)?$');
 /// (contrairement a PHP, tolerant). On le neutralise en %25.
 final RegExp _rePourcentInvalide = RegExp(r'%(?![0-9A-Fa-f]{2})');
 
+const List<String> _moisFr = [
+  '', 'janvier', 'février', 'mars', 'avril', 'mai', 'juin',
+  'juillet', 'août', 'septembre', 'octobre', 'novembre', 'décembre',
+];
+const Map<String, int> _moisAnglaisVersNumero = {
+  'january': 1, 'february': 2, 'march': 3, 'april': 4, 'may': 5, 'june': 6,
+  'july': 7, 'august': 8, 'september': 9, 'october': 10, 'november': 11,
+  'december': 12,
+};
+final RegExp _reDateJour = RegExp(r'^([A-Za-z]+)\s+(\d{1,2})\w{0,2},?\s+(\d{4})$');
+
+/// "July 18th, 2026" (texte du <h3> qui precede chaque groupe d'albums sur
+/// la page d'accueil) -> "18 juillet 2026", avec "— Aujourd'hui" si la date
+/// correspond au jour courant. Chaine d'origine inchangee si non reconnue.
+String formaterJourAlbum(String brut) {
+  final m = _reDateJour.firstMatch(brut.trim());
+  if (m == null) return brut.trim();
+  final numeroMois = _moisAnglaisVersNumero[m.group(1)!.toLowerCase()];
+  if (numeroMois == null) return brut.trim();
+  final jour = int.parse(m.group(2)!);
+  final annee = int.parse(m.group(3)!);
+
+  var label = '$jour ${_moisFr[numeroMois]} $annee';
+  final maintenant = DateTime.now();
+  if (jour == maintenant.day &&
+      numeroMois == maintenant.month &&
+      annee == maintenant.year) {
+    label += " — Aujourd'hui";
+  }
+  return label;
+}
+
 String assainir(String s) => s.replaceAll(_rePourcentInvalide, '%25');
 
 /// Chemin d'une URL, sans exception meme si l'encodage est douteux.
@@ -91,12 +123,18 @@ class Album {
   final String infos;
   final String annee;
 
+  /// Groupe de date ("18 juillet 2026", "... — Aujourd'hui") — seulement
+  /// rempli sur la page d'accueil (section "Latest"), vide ailleurs (liste,
+  /// recherche...) faute de balise <h3> de date a proximite.
+  final String jour;
+
   Album({
     required this.slug,
     required this.titre,
     this.pochette,
     this.infos = '',
     this.annee = '',
+    this.jour = '',
   });
 }
 
@@ -206,12 +244,24 @@ class Kh {
   }
 
   /// Extrait les albums d'un tableau (accueil, recherche).
+  ///
+  /// Sur l'accueil (section "Latest"), chaque groupe d'albums est precede
+  /// d'un <h3> de date ("July 18th, 2026") — absent des autres pages
+  /// (recherche, listes). querySelectorAll('h3, tr') les renvoie dans
+  /// l'ordre du document, ce qui permet de suivre le dernier <h3> vu et de
+  /// l'attacher a chaque <tr> suivant, sans devoir remonter l'arbre DOM.
   static List<Album> _albumsDepuis(String corps) {
     final doc = parser.parse(corps);
     final vus = <String>{};
     final out = <Album>[];
+    String jourActuel = '';
 
-    for (final tr in doc.querySelectorAll('tr')) {
+    for (final el in doc.querySelectorAll('h3, tr')) {
+      if (el.localName == 'h3') {
+        jourActuel = formaterJourAlbum(el.text);
+        continue;
+      }
+      final tr = el;
       String slug = '';
       String nom = '';
 
@@ -257,6 +307,7 @@ class Kh {
         pochette: pochette,
         infos: meta.take(3).join(' · '),
         annee: annee,
+        jour: jourActuel,
       ));
     }
     return out;

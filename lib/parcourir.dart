@@ -143,7 +143,7 @@ class PageParcourir extends StatelessWidget {
       children: [
         Text(
           titre,
-          style: const TextStyle(
+          style: TextStyle(
               color: kText, fontSize: 16, fontWeight: FontWeight.bold),
         ),
         const SizedBox(height: 10),
@@ -318,7 +318,7 @@ class _PageRequeteurState extends State<PageRequeteur> {
         actions: [
           IconButton(
             tooltip: 'Lancer',
-            icon: const Icon(Icons.shuffle, color: kAmber),
+            icon: Icon(Icons.shuffle, color: kAmber),
             onPressed: _lancer,
           ),
         ],
@@ -327,11 +327,11 @@ class _PageRequeteurState extends State<PageRequeteur> {
         future: _futur,
         builder: (context, snap) {
           if (snap.connectionState == ConnectionState.waiting) {
-            return const Center(child: CircularProgressIndicator(color: kAmber));
+            return Center(child: CircularProgressIndicator(color: kAmber));
           }
           if (snap.hasError) {
             return Center(
-              child: Text('${snap.error}', style: const TextStyle(color: kMuted)),
+              child: Text('${snap.error}', style: TextStyle(color: kMuted)),
             );
           }
           final plateformesDispo = snap.data![0];
@@ -347,12 +347,12 @@ class _PageRequeteurState extends State<PageRequeteur> {
               TextField(
                 controller: _controleurNombre,
                 keyboardType: TextInputType.number,
-                style: const TextStyle(color: kText),
+                style: TextStyle(color: kText),
                 decoration: const InputDecoration(labelText: "Nombre d'albums"),
               ),
               const SizedBox(height: 20),
               Text('Plateformes (optionnel, ${plateformesDispo.length})',
-                  style: const TextStyle(
+                  style: TextStyle(
                       color: kText, fontSize: 16, fontWeight: FontWeight.bold)),
               const SizedBox(height: 10),
               Wrap(
@@ -375,7 +375,7 @@ class _PageRequeteurState extends State<PageRequeteur> {
               ),
               const SizedBox(height: 24),
               Text('Années (optionnel, ${anneesDispo.length})',
-                  style: const TextStyle(
+                  style: TextStyle(
                       color: kText, fontSize: 16, fontWeight: FontWeight.bold)),
               const SizedBox(height: 10),
               Wrap(
@@ -431,7 +431,7 @@ class _Pastille extends StatelessWidget {
               Icon(icone, size: 15, color: kAmber),
               const SizedBox(width: 6),
             ],
-            Text(libelle, style: const TextStyle(color: kText, fontSize: 13)),
+            Text(libelle, style: TextStyle(color: kText, fontSize: 13)),
           ],
         ),
       ),
@@ -491,14 +491,14 @@ class _PageListeAlbumsState extends State<PageListeAlbums> {
         future: _futur,
         builder: (context, snap) {
           if (snap.connectionState == ConnectionState.waiting) {
-            return const Center(child: CircularProgressIndicator(color: kAmber));
+            return Center(child: CircularProgressIndicator(color: kAmber));
           }
           if (snap.hasError) {
             return _erreur('${snap.error}');
           }
           final albums = snap.data ?? [];
           if (albums.isEmpty) {
-            return const Center(
+            return Center(
               child: Text('Aucun album trouvé.', style: TextStyle(color: kMuted)),
             );
           }
@@ -519,17 +519,17 @@ class _PageListeAlbumsState extends State<PageListeAlbums> {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            const Icon(Icons.cloud_off, color: kMuted, size: 36),
+            Icon(Icons.cloud_off, color: kMuted, size: 36),
             const SizedBox(height: 12),
             Text(message,
                 textAlign: TextAlign.center,
-                style: const TextStyle(color: kMuted, fontSize: 13)),
+                style: TextStyle(color: kMuted, fontSize: 13)),
             const SizedBox(height: 16),
             OutlinedButton(
               onPressed: _reessayer,
               style: OutlinedButton.styleFrom(
                 foregroundColor: kAmber,
-                side: const BorderSide(color: kAmberDim),
+                side: BorderSide(color: kAmberDim),
               ),
               child: const Text('Réessayer'),
             ),
@@ -577,7 +577,7 @@ class _PageIndexParcourirState extends State<PageIndexParcourir> {
         future: _futur,
         builder: (context, snap) {
           if (snap.connectionState == ConnectionState.waiting) {
-            return const Center(child: CircularProgressIndicator(color: kAmber));
+            return Center(child: CircularProgressIndicator(color: kAmber));
           }
           if (snap.hasError) {
             return Center(
@@ -585,13 +585,13 @@ class _PageIndexParcourirState extends State<PageIndexParcourir> {
                 padding: const EdgeInsets.all(24),
                 child: Text('${snap.error}',
                     textAlign: TextAlign.center,
-                    style: const TextStyle(color: kMuted, fontSize: 13)),
+                    style: TextStyle(color: kMuted, fontSize: 13)),
               ),
             );
           }
           final liens = snap.data ?? [];
           if (liens.isEmpty) {
-            return const Center(
+            return Center(
               child: Text('Rien trouvé.', style: TextStyle(color: kMuted)),
             );
           }

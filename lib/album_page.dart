@@ -104,14 +104,14 @@ class _PageAlbumState extends State<PageAlbum> {
       context: context,
       builder: (contexteDialogue) => AlertDialog(
         backgroundColor: kSurface,
-        title: const Text('Configuration Kodi', style: TextStyle(color: kText)),
+        title: Text('Configuration Kodi', style: TextStyle(color: kText)),
         content: SingleChildScrollView(
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
               TextField(
                 controller: hoteCtrl,
-                style: const TextStyle(color: kText),
+                style: TextStyle(color: kText),
                 decoration: const InputDecoration(
                   labelText: 'Adresse IP de la box',
                   helperText: 'Adresse IP obligatoire : Android ne résout pas '
@@ -122,18 +122,18 @@ class _PageAlbumState extends State<PageAlbum> {
               TextField(
                 controller: portCtrl,
                 keyboardType: TextInputType.number,
-                style: const TextStyle(color: kText),
+                style: TextStyle(color: kText),
                 decoration: const InputDecoration(labelText: 'Port (8080 par défaut)'),
               ),
               TextField(
                 controller: utilisateurCtrl,
-                style: const TextStyle(color: kText),
+                style: TextStyle(color: kText),
                 decoration: const InputDecoration(labelText: 'Utilisateur (optionnel)'),
               ),
               TextField(
                 controller: motDePasseCtrl,
                 obscureText: true,
-                style: const TextStyle(color: kText),
+                style: TextStyle(color: kText),
                 decoration: const InputDecoration(labelText: 'Mot de passe (optionnel)'),
               ),
             ],
@@ -183,7 +183,7 @@ class _PageAlbumState extends State<PageAlbum> {
           if (album != null)
             IconButton(
               tooltip: 'Caster sur Kodi (appui long : configurer l\'adresse)',
-              icon: const Icon(Icons.cast, color: kAmber),
+              icon: Icon(Icons.cast, color: kAmber),
               onPressed: () => _casterKodi(album),
               onLongPress: () => _configurerKodi(),
             ),
@@ -192,7 +192,7 @@ class _PageAlbumState extends State<PageAlbum> {
       body: album == null
           ? (_erreur != null
               ? _messageErreur()
-              : const Center(child: CircularProgressIndicator(color: kAmber)))
+              : Center(child: CircularProgressIndicator(color: kAmber)))
           : (_erreur != null
               ? Column(
                   children: [_entete(album), Expanded(child: _messageErreur())],
@@ -215,6 +215,14 @@ class _PageAlbumState extends State<PageAlbum> {
                     _listePistes(album),
                     SliverToBoxAdapter(child: _description(album)),
                     SliverToBoxAdapter(child: _similaires(album)),
+                    // Marge basse dynamique : sans elle, les suggestions se
+                    // retrouvent en partie cachees sous la barre de
+                    // navigation systeme quand la barre de lecture n'est pas
+                    // affichee (aucune piste en file, donc pas de
+                    // bottomNavigationBar pour reserver cette zone).
+                    SliverToBoxAdapter(
+                      child: SizedBox(height: MediaQuery.paddingOf(context).bottom + 16),
+                    ),
                   ],
                 )),
       bottomNavigationBar: ValueListenableBuilder<List<Piste>>(
@@ -238,19 +246,19 @@ class _PageAlbumState extends State<PageAlbum> {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(album.titre,
-                    style: const TextStyle(
+                    style: TextStyle(
                         color: kText, fontSize: 17, fontWeight: FontWeight.bold)),
                 if (album.infos.isNotEmpty) ...[
                   const SizedBox(height: 6),
                   Text(album.infos,
                       maxLines: 3,
                       overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(color: kMuted, fontSize: 13)),
+                      style: TextStyle(color: kMuted, fontSize: 13)),
                 ],
                 if (album.annee.isNotEmpty) ...[
                   const SizedBox(height: 4),
                   Text(album.annee,
-                      style: const TextStyle(
+                      style: TextStyle(
                           color: kAmberDim,
                           fontSize: 14,
                           fontWeight: FontWeight.w600)),
@@ -261,7 +269,7 @@ class _PageAlbumState extends State<PageAlbum> {
                   builder: (context, echecs, _) => Text(
                     '${album.pistes.length} pistes'
                     '${echecs > 0 ? " · $echecs indisponible(s)" : ""}',
-                    style: const TextStyle(color: kMuted, fontSize: 12.5),
+                    style: TextStyle(color: kMuted, fontSize: 12.5),
                   ),
                 ),
               ],
@@ -292,10 +300,10 @@ class _PageAlbumState extends State<PageAlbum> {
             // point de mettre en pause tout le reste — y compris le
             // traitement du resultat deja arrive de la piste suivante. Une
             // icone fixe evite de declencher ce bug.
-            const Icon(Icons.cloud_download_outlined, size: 18, color: kAmber),
+            Icon(Icons.cloud_download_outlined, size: 18, color: kAmber),
             const SizedBox(width: 12),
             Text('Piste ${enFile.length} / ${album.pistes.length}',
-                style: const TextStyle(color: kMuted, fontSize: 13)),
+                style: TextStyle(color: kMuted, fontSize: 13)),
           ],
         ),
       ),
@@ -318,7 +326,7 @@ class _PageAlbumState extends State<PageAlbum> {
                 final actif = prete && courant == position;
 
                 return Container(
-                  decoration: const BoxDecoration(
+                  decoration: BoxDecoration(
                     border: Border(bottom: BorderSide(color: kLine, width: 1)),
                   ),
                   child: ListTile(
@@ -340,7 +348,7 @@ class _PageAlbumState extends State<PageAlbum> {
                     ),
                     trailing: Text(
                       prete ? p.duree : '…',
-                      style: const TextStyle(color: kMuted, fontSize: 12.5),
+                      style: TextStyle(color: kMuted, fontSize: 12.5),
                     ),
                     onTap: prete
                         ? () {
@@ -374,11 +382,11 @@ class _PageAlbumState extends State<PageAlbum> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Text('Description',
+          Text('Description',
               style: TextStyle(color: kText, fontSize: 15, fontWeight: FontWeight.bold)),
           const SizedBox(height: 8),
           Text(album.description,
-              style: const TextStyle(color: kMuted, fontSize: 13, height: 1.5)),
+              style: TextStyle(color: kMuted, fontSize: 13, height: 1.5)),
         ],
       ),
     );
@@ -392,7 +400,7 @@ class _PageAlbumState extends State<PageAlbum> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Text('Suggestions',
+          Text('Suggestions',
               style: TextStyle(color: kText, fontSize: 15, fontWeight: FontWeight.bold)),
           const SizedBox(height: 10),
           SizedBox(
@@ -418,7 +426,7 @@ class _PageAlbumState extends State<PageAlbum> {
                         Text(a.titre,
                             maxLines: 2,
                             overflow: TextOverflow.ellipsis,
-                            style: const TextStyle(color: kText, fontSize: 12.5)),
+                            style: TextStyle(color: kText, fontSize: 12.5)),
                       ],
                     ),
                   ),
@@ -433,7 +441,7 @@ class _PageAlbumState extends State<PageAlbum> {
 
   Widget _barreLecteur() {
     return Container(
-      decoration: const BoxDecoration(
+      decoration: BoxDecoration(
         color: kSurface,
         border: Border(top: BorderSide(color: kLine)),
       ),
@@ -454,7 +462,7 @@ class _PageAlbumState extends State<PageAlbum> {
                         item?.title ?? '—',
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(color: kAmber, fontSize: 14),
+                        style: TextStyle(color: kAmber, fontSize: 14),
                       ),
                     ),
                     StreamBuilder<Duration>(
@@ -463,7 +471,7 @@ class _PageAlbumState extends State<PageAlbum> {
                         final d = s.data ?? Duration.zero;
                         return Text(
                           '${d.inMinutes}:${(d.inSeconds % 60).toString().padLeft(2, '0')}',
-                          style: const TextStyle(color: kMuted, fontSize: 13),
+                          style: TextStyle(color: kMuted, fontSize: 13),
                         );
                       },
                     ),
@@ -511,7 +519,7 @@ class _PageAlbumState extends State<PageAlbum> {
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
                 IconButton(
-                  icon: const Icon(Icons.skip_previous, color: kText),
+                  icon: Icon(Icons.skip_previous, color: kText),
                   onPressed:
                       _lecteur.hasPrevious ? _lecteur.seekToPrevious : null,
                 ),
@@ -532,13 +540,13 @@ class _PageAlbumState extends State<PageAlbum> {
                 ),
                 const SizedBox(width: 12),
                 IconButton(
-                  icon: const Icon(Icons.skip_next, color: kText),
+                  icon: Icon(Icons.skip_next, color: kText),
                   onPressed: _lecteur.hasNext ? _lecteur.seekToNext : null,
                 ),
                 const SizedBox(width: 12),
                 IconButton(
                   tooltip: 'Stop',
-                  icon: const Icon(Icons.stop, color: kMuted),
+                  icon: Icon(Icons.stop, color: kMuted),
                   onPressed: Lecteur.instance.arreter,
                 ),
               ],
@@ -556,17 +564,17 @@ class _PageAlbumState extends State<PageAlbum> {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            const Icon(Icons.error_outline, color: kMuted, size: 36),
+            Icon(Icons.error_outline, color: kMuted, size: 36),
             const SizedBox(height: 12),
             Text(_erreur ?? '',
                 textAlign: TextAlign.center,
-                style: const TextStyle(color: kMuted, fontSize: 13)),
+                style: TextStyle(color: kMuted, fontSize: 13)),
             const SizedBox(height: 16),
             OutlinedButton(
               onPressed: _charger,
               style: OutlinedButton.styleFrom(
                 foregroundColor: kAmber,
-                side: const BorderSide(color: kAmberDim),
+                side: BorderSide(color: kAmberDim),
               ),
               child: const Text('Réessayer'),
             ),
