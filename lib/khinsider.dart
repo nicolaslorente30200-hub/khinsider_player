@@ -14,6 +14,11 @@ const String khBase = 'https://downloads.khinsider.com';
 final RegExp _reAudio = RegExp(r'\.(mp3|flac|ogg|m4a)$', caseSensitive: false);
 final RegExp _reSlug = RegExp(r'/game-soundtracks/album/([^/?#]+)');
 final RegExp _reAnnee = RegExp(r'^(19|20)\d{2}$');
+
+/// Pagination des pages de liste (plateforme, annee...) : "Page 1 of 7".
+/// Sans la suivre, une grosse plateforme (des milliers d'albums) ne rend
+/// que sa premiere page — les lettres A-B-C environ, jamais le reste.
+final RegExp _rePageTotale = RegExp(r'Page\s+\d+\s+of\s+(\d+)', caseSensitive: false);
 final RegExp _reDuree = RegExp(r'^\d+:\d{2}$');
 /// Libelles d'icones Material presents dans certaines cellules
 /// (le lien de telechargement affiche par exemple "get_app").
@@ -325,8 +330,28 @@ class Kh {
 
   /// Page de liste d'albums : classement, plateforme, annee... Meme
   /// structure de tableau que l'accueil et la recherche, donc meme analyse.
+  ///
+  /// Suit la pagination du site ("Page 1 of N") pour renvoyer la liste
+  /// complete, pas seulement sa premiere page — sans ca, un tirage au
+  /// hasard filtre par plateforme ne pioche jamais que parmi les premiers
+  /// albums (ordre alphabetique), jamais sur l'integralite.
   static Future<List<Album>> liste(String chemin) async {
-    return _albumsDepuis(await _get('$khBase$chemin'));
+    final premiere = await _get('$khBase$chemin');
+    var out = _albumsDepuis(premiere);
+
+    final total = int.tryParse(_rePageTotale.firstMatch(premiere)?.group(1) ?? '1') ?? 1;
+    if (total <= 1) return out;
+
+    final sep = chemin.contains('?') ? '&' : '?';
+    const parPaquet = 5; // limite le nombre de requetes simultanees
+    for (var debut = 2; debut <= total; debut += parPaquet) {
+      final fin = debut + parPaquet - 1 > total ? total : debut + parPaquet - 1;
+      final pages = await Future.wait(
+        [for (var p = debut; p <= fin; p++) _get('$khBase$chemin${sep}page=$p')],
+      );
+      out = [...out, ...pages.expand(_albumsDepuis)];
+    }
+    return out;
   }
 
   /// Page d'index (/console-list, /album-years) : pas d'albums, mais des

@@ -503,7 +503,8 @@ class _PageListeAlbumsState extends State<PageListeAlbums> {
             );
           }
           return ListView.builder(
-            padding: const EdgeInsets.all(12),
+            padding: EdgeInsets.fromLTRB(
+                12, 12, 12, 12 + MediaQuery.paddingOf(context).bottom),
             itemCount: albums.length,
             itemBuilder: (_, i) => CarteAlbum(album: albums[i]),
           );
