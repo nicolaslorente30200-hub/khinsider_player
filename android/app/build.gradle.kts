@@ -6,7 +6,7 @@ plugins {
 
 android {
     namespace = "xyz.perso.khinsider_ost"
-    compileSdk = flutter.compileSdkVersion
+    compileSdk = 36 // media_store_plus / shared_preferences / sqflite exigent compileSdk >= 36
     ndkVersion = flutter.ndkVersion
 
     compileOptions {

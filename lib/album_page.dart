@@ -1,11 +1,23 @@
+import 'dart:io';
+
+import 'package:archive/archive.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:http/http.dart' as http;
 import 'package:just_audio/just_audio.dart';
 import 'package:just_audio_background/just_audio_background.dart';
+import 'package:path_provider/path_provider.dart';
 
 import 'khinsider.dart';
 import 'kodi.dart';
 import 'lecteur.dart';
 import 'main.dart';
+
+/// Canal natif (voir MainActivity.kt, injecte par tools/patch_android.py) :
+/// enregistre un fichier deja sur le disque dans le dossier Telechargements
+/// public via MediaStore — une simple ecriture par chemin de fichier est
+/// bloquee par le stockage cloisonne depuis Android 10.
+const _canalTelechargements = MethodChannel('xyz.perso.khinsider_ost/telechargements');
 
 class PageAlbum extends StatefulWidget {
   final String slug;
@@ -89,6 +101,82 @@ class _PageAlbumState extends State<PageAlbum> {
           SnackBar(content: Text('Échec du cast Kodi : $e')),
         );
       }
+    }
+  }
+
+  /// Telecharge toutes les pistes et les enregistre en une archive .zip
+  /// dans le dossier Telechargements public — equivalent mobile de
+  /// download.php sur le site web (meme principe : recuperer chaque piste,
+  /// les compresser, servir une seule archive).
+  bool _telechargementEnCours = false;
+
+  Future<void> _telechargerAlbum(AlbumDetail album) async {
+    if (_telechargementEnCours) return;
+    setState(() => _telechargementEnCours = true);
+
+    File? fichierTmp;
+    try {
+      final zip = Archive();
+      var recuperees = 0;
+
+      for (var i = 0; i < album.pistes.length; i++) {
+        final piste = album.pistes[i];
+        piste.url ??= await Kh.urlPiste(piste.chemin);
+        final url = piste.url;
+        if (url == null) continue;
+
+        final reponse = await http.get(Uri.parse(url));
+        if (reponse.statusCode != 200) continue;
+
+        final numero = (i + 1).toString().padLeft(2, '0');
+        final extension = url.split('.').last.split('?').first;
+        final nomPiste = '$numero - ${piste.nom}.$extension'
+            .replaceAll(RegExp(r'[\/\\:*?"<>|]'), '_');
+
+        zip.addFile(ArchiveFile(nomPiste, reponse.bodyBytes.length, reponse.bodyBytes));
+        recuperees++;
+      }
+
+      if (recuperees == 0) {
+        throw Exception('Aucune piste n\'a pu être récupérée.');
+      }
+
+      final octetsZip = ZipEncoder().encode(zip);
+      if (octetsZip == null) {
+        throw Exception('Échec de la compression de l\'archive.');
+      }
+      final nomZip = '${album.titre}.zip'.replaceAll(RegExp(r'[\/\\:*?"<>|]'), '_');
+
+      final dossierTmp = await getTemporaryDirectory();
+      fichierTmp = File('${dossierTmp.path}/$nomZip');
+      await fichierTmp.writeAsBytes(octetsZip);
+
+      final uri = await _canalTelechargements.invokeMethod<String>(
+        'enregistrerDansTelechargements',
+        {'chemin': fichierTmp.path, 'nom': nomZip},
+      );
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text(uri != null
+              ? 'Archive téléchargée : $nomZip ($recuperees pistes)'
+              : 'Échec de l\'enregistrement de l\'archive'),
+        ));
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text('Échec du téléchargement : $e')));
+      }
+    } finally {
+      if (fichierTmp != null) {
+        try {
+          await fichierTmp.delete();
+        } catch (_) {
+          // Fichier temporaire deja absent ou verrouille : sans consequence.
+        }
+      }
+      if (mounted) setState(() => _telechargementEnCours = false);
     }
   }
 
@@ -178,8 +266,19 @@ class _PageAlbumState extends State<PageAlbum> {
 
     return Scaffold(
       appBar: AppBar(
-        title: Text(album?.titre ?? 'Album'),
         actions: [
+          if (album != null)
+            IconButton(
+              tooltip: 'Télécharger l\'album (archive .zip)',
+              icon: _telechargementEnCours
+                  ? SizedBox(
+                      width: 20,
+                      height: 20,
+                      child: CircularProgressIndicator(strokeWidth: 2, color: kAmber),
+                    )
+                  : Icon(Icons.download, color: kAmber),
+              onPressed: _telechargementEnCours ? null : () => _telechargerAlbum(album),
+            ),
           if (album != null)
             IconButton(
               tooltip: 'Caster sur Kodi (appui long : configurer l\'adresse)',

@@ -25,6 +25,13 @@ dependencies:
   # Config Kodi (adresse/port) persistee pour le cast direct via JSON-RPC
   shared_preferences: ^2.3.3
 
+  # Telechargement de l'album en une archive .zip (comme download.php du
+  # site web) ; l'enregistrement dans le dossier Telechargements public
+  # passe par un canal natif (MediaStore, voir tools/patch_android.py),
+  # pas de plugin ici pour cette derniere etape
+  archive: ^3.6.1
+  path_provider: ^2.1.4
+
 dev_dependencies:
   flutter_lints: ^3.0.0
   flutter_launcher_icons: ^0.14.1

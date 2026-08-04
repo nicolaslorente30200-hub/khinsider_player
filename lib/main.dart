@@ -125,6 +125,16 @@ Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await chargerPaletteEnregistree();
 
+  // Utile seulement sur Android <10 (voir MainActivity.kt cote natif, qui
+  // bascule sur MediaStore a partir d'Android 10 sans avoir besoin de
+  // cette permission) ; sans effet mais sans risque sur les versions plus
+  // recentes.
+  try {
+    await Permission.storage.request();
+  } catch (_) {
+    // Plateforme sans notion de permission stockage : sans consequence.
+  }
+
   // Active la lecture en arriere-plan et les controles systeme.
   //
   // Attention : androidNotificationOngoing: true impose

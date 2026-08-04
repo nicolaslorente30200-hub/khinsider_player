@@ -21,6 +21,8 @@ PERMISSIONS = """    <uses-permission android:name="android.permission.INTERNET"
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE"/>
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK"/>
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
+    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" android:maxSdkVersion="32"/>
+    <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" android:maxSdkVersion="29"/>
 """
 
 SERVICE = """
@@ -92,6 +94,8 @@ def patch_manifeste():
     for attendu, libelle in [
         ('FOREGROUND_SERVICE_MEDIA_PLAYBACK', 'permission media playback'),
         ('POST_NOTIFICATIONS', 'permission notifications'),
+        ('READ_EXTERNAL_STORAGE', 'permission lecture stockage (telechargement zip)'),
+        ('WRITE_EXTERNAL_STORAGE', 'permission ecriture stockage (telechargement zip)'),
         ('com.ryanheise.audioservice.AudioService', 'service audio'),
         ('com.ryanheise.audioservice.MediaButtonReceiver', 'recepteur boutons media'),
         ('xmlns:tools', 'espace de noms tools'),
@@ -125,6 +129,109 @@ def patch_activite():
             erreurs.append(f'{f} : heritage AudioServiceActivity absent')
         else:
             print(f'{f} traite.')
+
+
+CANAL_TELECHARGEMENTS = 'xyz.perso.khinsider_ost/telechargements'
+
+IMPORTS_TELECHARGEMENT = """import android.content.ContentValues
+import android.os.Build
+import android.os.Environment
+import android.provider.MediaStore
+import com.ryanheise.audioservice.AudioServiceActivity
+import io.flutter.embedding.engine.FlutterEngine
+import io.flutter.plugin.common.MethodChannel
+import java.io.File
+"""
+
+CORPS_ACTIVITE = '''class MainActivity : AudioServiceActivity() {
+    override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
+        super.configureFlutterEngine(flutterEngine)
+
+        // Enregistre l'archive .zip d'un album dans le dossier
+        // Telechargements public : le stockage cloisonne depuis Android 10
+        // interdit l'ecriture directe par chemin de fichier dans ce dossier
+        // partage, MediaStore est la seule API fiable sur toutes versions.
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "''' + CANAL_TELECHARGEMENTS + '''")
+            .setMethodCallHandler { call, result ->
+                if (call.method == "enregistrerDansTelechargements") {
+                    val chemin = call.argument<String>("chemin")
+                    val nom = call.argument<String>("nom")
+                    if (chemin == null || nom == null) {
+                        result.error("ARGS", "chemin/nom manquant", null)
+                    } else {
+                        try {
+                            result.success(enregistrerDansTelechargements(chemin, nom))
+                        } catch (e: Exception) {
+                            result.error("ECHEC", e.message, null)
+                        }
+                    }
+                } else {
+                    result.notImplemented()
+                }
+            }
+    }
+
+    private fun enregistrerDansTelechargements(chemin: String, nom: String): String {
+        val source = File(chemin)
+
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) {
+            val dossier = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
+            if (!dossier.exists()) dossier.mkdirs()
+            val destination = File(dossier, nom)
+            source.copyTo(destination, overwrite = true)
+            return destination.absolutePath
+        }
+
+        val valeurs = ContentValues().apply {
+            put(MediaStore.MediaColumns.DISPLAY_NAME, nom)
+            put(MediaStore.MediaColumns.MIME_TYPE, "application/zip")
+            put(MediaStore.MediaColumns.RELATIVE_PATH, "Download/")
+        }
+        val uri = contentResolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, valeurs)
+            ?: throw Exception("Impossible de creer l'entree MediaStore")
+        contentResolver.openOutputStream(uri)?.use { sortie ->
+            source.inputStream().use { entree -> entree.copyTo(sortie) }
+        } ?: throw Exception("Impossible d'ouvrir le flux d'ecriture")
+        return uri.toString()
+    }
+}
+'''
+
+
+def patch_telechargement():
+    """Canal natif MediaStore pour enregistrer l'archive .zip d'un album
+    dans le dossier Telechargements public (voir PageAlbum._telechargerAlbum
+    cote Dart). Necessaire car android/ est regenere a chaque build CI :
+    sans ce patch, MainActivity.kt perd ce code a chaque compilation."""
+    fichiers = glob.glob('android/app/src/main/kotlin/**/MainActivity.kt', recursive=True)
+
+    if not fichiers:
+        erreurs.append('MainActivity.kt introuvable (canal telechargements)')
+        return
+
+    for f in fichiers:
+        src = open(f, encoding='utf-8').read()
+        if CANAL_TELECHARGEMENTS in src:
+            print(f'{f} : canal telechargements deja present.')
+            continue
+
+        src = src.replace(
+            'import com.ryanheise.audioservice.AudioServiceActivity\n',
+            IMPORTS_TELECHARGEMENT)
+
+        src, n = re.subn(r'class MainActivity\s*:\s*AudioServiceActivity\(\)\s*\n?',
+                         CORPS_ACTIVITE, src, count=1)
+        if n == 0:
+            erreurs.append(f'{f} : corps de classe introuvable pour le canal telechargements')
+            continue
+
+        open(f, 'w', encoding='utf-8').write(src)
+
+        final = open(f, encoding='utf-8').read()
+        if CANAL_TELECHARGEMENTS not in final:
+            erreurs.append(f'{f} : canal telechargements absent apres patch')
+        else:
+            print(f'{f} : canal telechargements ajoute.')
 
 
 def patch_shrink_resources():
@@ -172,6 +279,34 @@ def patch_shrink_resources():
             erreurs.append(f'{f} : shrinkResources toujours actif apres patch')
 
 
+def patch_compile_sdk():
+    """media_store_plus / shared_preferences / sqflite exigent compileSdk >= 36."""
+    fichiers = [f for f in ('android/app/build.gradle.kts', 'android/app/build.gradle')
+                if os.path.isfile(f)]
+    if not fichiers:
+        erreurs.append('build.gradle introuvable')
+        return
+
+    for f in fichiers:
+        src = open(f, encoding='utf-8').read()
+        avant = src
+
+        src = re.sub(r'compileSdk\s*=\s*flutter\.compileSdkVersion', 'compileSdk = 36', src)
+        src = re.sub(r'compileSdk(?:Version)?\s*=?\s*(\d+)',
+                     lambda m: 'compileSdk = 36' if int(m.group(1)) < 36 else m.group(0), src)
+
+        if src != avant:
+            open(f, 'w', encoding='utf-8').write(src)
+            print(f'{f} : compileSdk porte a 36.')
+        else:
+            print(f'{f} : compileSdk deja conforme.')
+
+        final = open(f, encoding='utf-8').read()
+        trouve = re.search(r'compileSdk\s*=\s*(\d+)', final)
+        if not trouve or int(trouve.group(1)) < 36:
+            erreurs.append(f'{f} : compileSdk toujours < 36')
+
+
 def patch_min_sdk():
     """audio_service exige minSdk 23 ; Flutter genere parfois une valeur plus basse."""
     fichiers = [f for f in ('android/app/build.gradle.kts', 'android/app/build.gradle')
@@ -206,7 +341,9 @@ def patch_min_sdk():
 if __name__ == '__main__':
     patch_manifeste()
     patch_activite()
+    patch_telechargement()
     patch_shrink_resources()
+    patch_compile_sdk()
     patch_min_sdk()
 
     if erreurs:
