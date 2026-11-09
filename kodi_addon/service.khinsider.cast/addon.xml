@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<addon id="service.khinsider.cast" name="KHINSIDER·ost Cast" version="1.0.0" provider-name="nIKO">
+  <requires>
+    <import addon="xbmc.python" version="3.0.0"/>
+  </requires>
+  <extension point="xbmc.service" library="service.py" start="login"/>
+  <extension point="xbmc.addon.metadata">
+    <platform>all</platform>
+    <summary lang="fr_FR">Reçoit les albums envoyés par l'app KHINSIDER·ost</summary>
+    <description lang="fr_FR">Service qui attend un album envoyé par l'app Android KHINSIDER·ost et le lit avec pochette, album, année et titres des pistes. Il ne contacte pas khinsider.com : les liens mp3 lui sont fournis par l'app.</description>
+    <summary lang="en_GB">Receives albums sent by the KHINSIDER·ost app</summary>
+    <description lang="en_GB">Background service that waits for an album sent by the KHINSIDER·ost Android app and plays it with cover art, album, year and track titles. It never contacts khinsider.com: the mp3 links are supplied by the app.</description>
+  </extension>
+</addon>

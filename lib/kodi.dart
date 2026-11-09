@@ -4,6 +4,8 @@ import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 
+import 'khinsider.dart';
+
 /// Cast direct vers Kodi via l'API JSON-RPC.
 ///
 /// NB : l'historique ci-dessous decrit l'ancienne solution (action de
@@ -113,12 +115,112 @@ class Kodi {
     return donnees is Map ? donnees['result'] : null;
   }
 
-  /// Cast sans plugin : l'app resout elle-meme les liens mp3 directs, puis
-  /// pilote la playlist audio de Kodi (Playlist.Clear / Playlist.Add /
-  /// Player.Open). Cloudflare bloque desormais l'addon et le relais qu'il
-  /// utilisait pour joindre khinsider.com, alors que l'app Android passe
-  /// encore. Les liens http directs ne sont pas concernes par le bug des
-  /// playlists de plugins audio decrit plus haut.
+  /// Identifiant du petit service Kodi qui recoit les albums avec leurs
+  /// metadonnees (voir kodi_addon/service.khinsider.cast).
+  static const _addonCast = 'service.khinsider.cast';
+
+  static Future<bool> _addonCastInstalle(ConfigKodi config) async {
+    try {
+      final r = await _rpc(config, 'Addons.GetAddonDetails', {
+        'addonid': _addonCast,
+        'properties': ['enabled'],
+      });
+      return r is Map && r['addon'] is Map && r['addon']['enabled'] == true;
+    } catch (_) {
+      return false; // addon absent (Kodi repond une erreur) ou Kodi injoignable
+    }
+  }
+
+  /// Valeur d'une ligne "Libelle : valeur" de AlbumDetail.description.
+  static String _champ(AlbumDetail album, String libelle) {
+    for (final ligne in album.description.split('\n')) {
+      if (ligne.startsWith('$libelle : ')) {
+        return ligne.substring(libelle.length + 3).trim();
+      }
+    }
+    return '';
+  }
+
+  /// "3:25" ou "1:02:03" -> secondes (0 si illisible).
+  static int _secondes(String duree) {
+    final parties = duree.split(':').map(int.tryParse).toList();
+    if (parties.isEmpty || parties.contains(null)) return 0;
+    return parties.fold<int>(0, (total, p) => total * 60 + p!);
+  }
+
+  /// Envoie l'album a Kodi. Avec le service [_addonCast] installe sur la box,
+  /// la playlist est construite cote Kodi avec pochette, album, annee, titres
+  /// des pistes ; sans lui, repli sur une playlist de liens bruts (aucune
+  /// metadonnee, voir [_casterListeSimple]).
+  ///
+  /// [resoudre] renvoie l'URL mp3 d'une piste (ou null). Retourne le nombre
+  /// de pistes envoyees.
+  static Future<int> casterAlbum(
+    ConfigKodi config,
+    AlbumDetail album,
+    Future<String?> Function(Piste) resoudre,
+  ) async {
+    if (!await _addonCastInstalle(config)) {
+      return _casterListeSimple(config, [
+        for (final p in album.pistes) () => resoudre(p),
+      ]);
+    }
+
+    // Resolution de toutes les pistes (par paquets de 4), puis envoi unique.
+    final pistes = <Map<String, dynamic>>[];
+    const paquet = 4;
+    for (var i = 0; i < album.pistes.length; i += paquet) {
+      final fin = i + paquet > album.pistes.length ? album.pistes.length : i + paquet;
+      final lot = album.pistes.sublist(i, fin);
+      final urls = await Future.wait([
+        for (final p in lot) resoudre(p).catchError((_) => null),
+      ]);
+      for (var j = 0; j < lot.length; j++) {
+        final url = urls[j];
+        if (url == null) continue;
+        pistes.add({
+          'titre': lot[j].nom,
+          'url': url,
+          'duree': _secondes(lot[j].duree),
+        });
+      }
+    }
+    if (pistes.isEmpty) {
+      throw Exception('Aucune piste n\'a pu être résolue');
+    }
+
+    await _rpc(config, 'JSONRPC.NotifyAll', {
+      'sender': 'khinsider',
+      'message': 'khinsider_cast',
+      'data': {
+        'album': {
+          'titre': album.titre,
+          'annee': album.annee,
+          'pochette': album.pochette ?? '',
+          'artiste': _champ(album, 'Développé par'),
+          'genre': _champ(album, 'Plateformes'),
+        },
+        'pistes': pistes,
+      },
+    });
+
+    // Laisse au service le temps de lancer la lecture avant de basculer sur
+    // l'ecran de lecture plein ecran.
+    await Future.delayed(const Duration(seconds: 2));
+    try {
+      await _rpc(config, 'GUI.ActivateWindow', {'window': 'visualisation'});
+    } catch (e) {
+      debugPrint('[kodi] GUI.ActivateWindow a echoue (sans gravite) : $e');
+    }
+    return pistes.length;
+  }
+
+  /// Repli sans le service Kodi : l'app resout elle-meme les liens mp3
+  /// directs, puis pilote la playlist audio de Kodi (Playlist.Clear /
+  /// Playlist.Add / Player.Open). Cloudflare bloque l'addon d'origine et son
+  /// relais, alors que l'app Android passe encore. Les liens http directs ne
+  /// sont pas concernes par le bug des playlists de plugins audio decrit
+  /// plus haut.
   ///
   /// Limite : Kodi n'a ni titre ni pochette fournis, il affiche ce que
   /// contiennent les tags du mp3, sinon le nom du fichier.
@@ -126,7 +228,7 @@ class Kodi {
   /// [resoudre] renvoie l'URL mp3 d'une piste (ou null). La lecture demarre
   /// des la premiere piste ajoutee ; les suivantes sont resolues par paquets
   /// de 4 puis ajoutees dans l'ordre, pour ne pas attendre tout l'album.
-  static Future<int> casterAlbum(
+  static Future<int> _casterListeSimple(
     ConfigKodi config,
     List<Future<String?> Function()> resoudre,
   ) async {
