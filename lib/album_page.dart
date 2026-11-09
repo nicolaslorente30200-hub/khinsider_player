@@ -89,10 +89,13 @@ class _PageAlbumState extends State<PageAlbum> {
     if (config == null) return;
 
     try {
-      await Kodi.casterAlbum(config, album.slug);
+      final n = await Kodi.casterAlbum(config, [
+        for (final p in album.pistes)
+          () async => p.url ??= await Kh.urlPiste(p.chemin),
+      ]);
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Envoyé à Kodi : ${album.titre}')),
+          SnackBar(content: Text('Envoyé à Kodi : ${album.titre} ($n pistes)')),
         );
       }
     } catch (e) {

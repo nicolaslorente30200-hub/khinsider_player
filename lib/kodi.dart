@@ -6,6 +6,10 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 /// Cast direct vers Kodi via l'API JSON-RPC.
 ///
+/// NB : l'historique ci-dessous decrit l'ancienne solution (action de
+/// l'addon plugin.audio.khinsider). Elle n'est plus utilisee : voir
+/// casterAlbum, qui n'a plus besoin de l'addon.
+///
 /// Historique de ce qui a ete teste sur ce dossier album (plugin://
 /// plugin.audio.khinsider/?action=album&slug=...) — toutes les tentatives ou
 /// l'app JSON-RPC pilote elle-meme une playlist (Playlist.Add, Player.Open
@@ -109,22 +113,69 @@ class Kodi {
     return donnees is Map ? donnees['result'] : null;
   }
 
-  static Future<void> casterAlbum(ConfigKodi config, String slugAlbum) async {
-    await _rpc(config, 'Addons.ExecuteAddon', {
-      'addonid': 'plugin.audio.khinsider',
-      'params': {'action': 'jouer', 'slug': slugAlbum},
-    });
+  /// Cast sans plugin : l'app resout elle-meme les liens mp3 directs, puis
+  /// pilote la playlist audio de Kodi (Playlist.Clear / Playlist.Add /
+  /// Player.Open). Cloudflare bloque desormais l'addon et le relais qu'il
+  /// utilisait pour joindre khinsider.com, alors que l'app Android passe
+  /// encore. Les liens http directs ne sont pas concernes par le bug des
+  /// playlists de plugins audio decrit plus haut.
+  ///
+  /// Limite : Kodi n'a ni titre ni pochette fournis, il affiche ce que
+  /// contiennent les tags du mp3, sinon le nom du fichier.
+  ///
+  /// [resoudre] renvoie l'URL mp3 d'une piste (ou null). La lecture demarre
+  /// des la premiere piste ajoutee ; les suivantes sont resolues par paquets
+  /// de 4 puis ajoutees dans l'ordre, pour ne pas attendre tout l'album.
+  static Future<int> casterAlbum(
+    ConfigKodi config,
+    List<Future<String?> Function()> resoudre,
+  ) async {
+    const audio = 0; // identifiant de la playlist audio de Kodi
+    var ajoutees = 0;
+    var demarre = false;
+
+    Future<void> ajouter(String url) async {
+      await _rpc(config, 'Playlist.Add', {
+        'playlistid': audio,
+        'item': {'file': url},
+      });
+      ajoutees++;
+      if (!demarre) {
+        demarre = true;
+        await _rpc(config, 'Player.Open', {
+          'item': {'playlistid': audio, 'position': 0},
+        });
+      }
+    }
+
+    await _rpc(config, 'Playlist.Clear', {'playlistid': audio});
+
+    const paquet = 4;
+    for (var i = 0; i < resoudre.length; i += paquet) {
+      final fin = i + paquet > resoudre.length ? resoudre.length : i + paquet;
+      final urls = await Future.wait([
+        for (var j = i; j < fin; j++)
+          resoudre[j]().catchError((_) => null),
+      ]);
+      for (final url in urls) {
+        if (url != null) await ajouter(url);
+      }
+    }
+
+    if (ajoutees == 0) {
+      throw Exception('Aucune piste n\'a pu être résolue');
+    }
 
     // Sans ceci, Kodi reste momentanement sur l'ecran de navigation du
-    // module musique le temps que l'addon s'execute, plutot que de basculer
-    // directement sur l'ecran de lecture plein ecran. On force donc la
-    // fenetre "visualisation" (l'ecran plein ecran audio "En cours de
-    // lecture") une fois la lecture demarree.
+    // module musique plutot que de basculer directement sur l'ecran de
+    // lecture plein ecran. On force donc la fenetre "visualisation" (l'ecran
+    // plein ecran audio "En cours de lecture") une fois la lecture demarree.
     try {
       await _rpc(config, 'GUI.ActivateWindow', {'window': 'visualisation'});
     } catch (e) {
       debugPrint('[kodi] GUI.ActivateWindow a echoue (sans gravite) : $e');
     }
+    return ajoutees;
   }
 }
 
